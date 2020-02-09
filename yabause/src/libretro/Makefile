@@ -168,9 +168,9 @@ else ifeq ($(platform), classic_armv8_a35)
         FLAGS += -DARM
         ARCH = arm
         ARCH_IS_LINUX = 1
-        LDFLAGS += -pthread
+        FORCE_GLES = 1
         CFLAGS += -march=armv8-a
-        LDFLAGS += -static-libgcc -static-libstdc++
+        LDFLAGS += -static-libgcc -static-libstdc++ -lpthread -lGLESv2
 #######################################
 
 # ODROIDs
