@@ -69,6 +69,7 @@ static int opengl_version = 330;
 
 static int g_vidcoretype = VIDCORE_OGL;
 static int g_sh2coretype = 8;
+static int g_skipframe = 0;
 static int g_videoformattype = VIDEOFORMATTYPE_NTSC;
 static int resolution_mode = 1;
 static int polygon_mode = PERSPECTIVE_CORRECTION;
@@ -82,6 +83,7 @@ static bool stv_mode = false;
 static bool all_devices_ready = false;
 static bool libretro_supports_bitmasks = false;
 static bool rendering_started = false;
+static bool one_frame_rendered = false;
 static int16_t libretro_input_bitmask[12] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
 static int pad_type[12] = {1,1,1,1,1,1,1,1,1,1,1,1};
 static int multitap[2] = {0,0};
@@ -176,6 +178,7 @@ int PERLIBRETROInit(void)
       PerSetKey(PERJAMMA_P2_BUTTON2, PERJAMMA_P2_BUTTON2, controller );
       PerSetKey(PERJAMMA_P2_BUTTON3, PERJAMMA_P2_BUTTON3, controller );
       PerSetKey(PERJAMMA_P2_BUTTON4, PERJAMMA_P2_BUTTON4, controller );
+      players = 2;
       return 0;
    }
 
@@ -234,7 +237,7 @@ static int input_state_cb_wrapper(unsigned port, unsigned device, unsigned index
       return input_state_cb(port, device, index, id);
 }
 
-static int PERLIBRETROHandleEvents(void)
+static int update_inputs(void)
 {
    unsigned i = 0;
 
@@ -515,6 +518,11 @@ static int PERLIBRETROHandleEvents(void)
    return 0;
 }
 
+static int PERLIBRETROHandleEvents(void)
+{
+   return update_inputs();
+}
+
 void PERLIBRETRODeInit(void) {}
 
 void PERLIBRETRONothing(void) {}
@@ -763,6 +771,7 @@ void YuiSwapBuffers(void)
       retro_set_resolution();
    audio_size = soundlen;
    video_cb(RETRO_HW_FRAME_BUFFER_VALID, current_width, current_height, 0);
+   one_frame_rendered = true;
 }
 
 static void context_reset(void)
@@ -914,6 +923,24 @@ void check_variables(void)
          g_videoformattype = VIDEOFORMATTYPE_PAL;
    }
 
+   var.key = "kronos_skipframe";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (strcmp(var.value, "0") == 0)
+         g_skipframe = 0;
+      else if (strcmp(var.value, "1") == 0)
+         g_skipframe = 1;
+      else if (strcmp(var.value, "2") == 0)
+         g_skipframe = 2;
+      else if (strcmp(var.value, "3") == 0)
+         g_skipframe = 3;
+      else if (strcmp(var.value, "4") == 0)
+         g_skipframe = 4;
+      else if (strcmp(var.value, "5") == 0)
+         g_skipframe = 5;
+   }
+
    var.key = "kronos_sh2coretype";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
@@ -972,6 +999,8 @@ void check_variables(void)
          addon_cart_type = CART_DRAM8MBIT;
       else if (strcmp(var.value, "4M_extended_ram") == 0 )
          addon_cart_type = CART_DRAM32MBIT;
+      else if (strcmp(var.value, "16M_extended_ram") == 0 )
+         addon_cart_type = CART_DRAM128MBIT;
       else if (strcmp(var.value, "512K_backup_ram") == 0)
          addon_cart_type = CART_BACKUPRAM4MBIT;
       else if (strcmp(var.value, "1M_backup_ram") == 0)
@@ -1198,6 +1227,11 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
    info->geometry.max_width    = max_width;
    info->geometry.max_height   = max_height;
    info->geometry.aspect_ratio = (retro_get_region() == RETRO_REGION_NTSC) ? 4.0 / 3.0 : 5.0 / 4.0;
+   if(yabsys.isRotated == 1)
+   {
+      environ_cb(RETRO_ENVIRONMENT_SET_ROTATION, &yabsys.isRotated);
+      info->geometry.aspect_ratio = 1.0 / info->geometry.aspect_ratio;
+   }
 }
 
 void retro_set_controller_port_device(unsigned port, unsigned device)
@@ -1221,9 +1255,7 @@ size_t retro_serialize_size(void)
    void *buffer;
    size_t size;
 
-   ScspMuteAudio(SCSP_MUTE_SYSTEM);
    YabSaveStateBuffer (&buffer, &size);
-   ScspUnMuteAudio(SCSP_MUTE_SYSTEM);
 
    free(buffer);
 
@@ -1397,6 +1429,7 @@ bool retro_load_game_common()
    yinit.buppath                 = bup_path;
    yinit.meshmode                = mesh_mode;
    yinit.use_cs                  = use_cs;
+   yinit.skipframe               = g_skipframe;
 
    return true;
 }
@@ -1549,6 +1582,7 @@ void retro_run(void)
    unsigned i;
    bool updated  = false;
    rendering_started = true;
+   one_frame_rendered = false;
    if (!all_devices_ready)
    {
       // Running first frame, so we can assume all devices id were set
@@ -1573,9 +1607,16 @@ void retro_run(void)
       VIDCore->SetSettingValue(VDP_SETTING_MESH_MODE, mesh_mode);
       VIDCore->SetSettingValue(VDP_SETTING_COMPUTE_SHADER, use_cs);
       YabauseSetVideoFormat(g_videoformattype);
+      YabauseSetSkipframe(g_skipframe);
    }
 
+   // It appears polling can happen outside of HandleEvents
+   update_inputs();
    YabauseExec();
+
+   // If no frame rendered, dupe
+   if(!one_frame_rendered)
+      video_cb(NULL, current_width, current_height, 0);
 }
 
 #ifdef ANDROID

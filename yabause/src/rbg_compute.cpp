@@ -36,7 +36,7 @@ SHADER_VERSION_COMPUTE
 "precision highp image2D;\n"
 "#endif\n"
 "layout(local_size_x = 4, local_size_y = 4) in;\n"
-"layout(rgba8, binding = 0) writeonly highp uniform image2D outSurface;\n"
+"layout(rgba8, binding = 0) writeonly uniform image2D outSurface;\n"
 "layout(std430, binding = 1) readonly buffer VDP2 { uint vram[]; };\n"
 " struct vdp2rotationparameter_struct{ \n"
 " uint PlaneAddrv[16];\n"
@@ -123,7 +123,6 @@ SHADER_VERSION_COMPUTE
 "  int window_area_mode;"
 "  uint alpha;\n"
 "  uint priority;\n"
-"  int cram_shift;\n"
 "  int startLine;\n"
 "  int endLine;\n"
 "  uint specialprimode;\n"
@@ -142,7 +141,7 @@ SHADER_VERSION_COMPUTE
 "      if( (addr & 0x02u) != 0u ) { kdata >>= 16; } \n"
 "      kdata = (((kdata) >> 8 & 0xFFu) | ((kdata) & 0xFFu) << 8);\n"
 "    }else{\n"
-"      kdata = cram[ ((0x800u + (addr&0xFFFu))>>2)  ]; \n"
+"      kdata = cram[ (0x800u + (addr&0xFFFu)>>2)  ]; \n"
 "      if( (addr & 0x02u) != 0u ) { kdata >>= 16; } \n"
 "    }\n"
 "    if ( (kdata & 0x8000u) != 0u) { return -1; }\n"
@@ -154,7 +153,7 @@ SHADER_VERSION_COMPUTE
 "	     kdata = vram[ addr>>2 ]; \n"
 "      kdata = ((kdata&0xFF000000u) >> 24 | ((kdata) >> 8 & 0xFF00u) | ((kdata) & 0xFF00u) << 8 | (kdata&0x000000FFu) << 24);\n"
 "    }else{\n"
-"      kdata = cram[ ((0x800u + (addr&0xFFFu) )>>2) ]; \n"
+"      kdata = cram[ 0x800u + ((addr&0x7FFu )>>2) ]; \n"
 "      kdata = ((kdata&0xFFFF0000u)>>16|(kdata&0x0000FFFFu)<<16);\n"
 "    }\n"
 "	 if( para[paramid].linecoefenab != 0) lineaddr = (kdata >> 24) & 0x7Fu; else lineaddr = 0u;\n"
@@ -192,7 +191,7 @@ SHADER_VERSION_COMPUTE
 
 "uint get_cram_msb(uint colorindex) { \n"
 "	uint colorval = 0u; \n"
-"	colorindex = (colorindex << cram_shift) & 0xFFFu; \n"
+"	colorindex = (0x800u + colorindex&0x7FFu); \n"
 "	colorval = cram[colorindex >> 2]; \n"
 "	if ((colorindex & 0x02u) != 0u) { colorval >>= 16; } \n"
 "	return (colorval & 0x8000u); \n"
@@ -203,51 +202,18 @@ SHADER_VERSION_COMPUTE
 " return vec4(float((ret >> 0)&0xFFu)/255.0,float((ret >> 8)&0xFFu)/255.0, float((ret >> 16)&0xFFu)/255.0, float((ret >> 24)&0xFFu)/255.0);"
 "\n}"
 
-"uint PixelIsSpecialPriority(uint specialcode_, uint dot)\n"
-"{\n"
-"   dot &= 0xfu;\n"
-"   if ((specialcode_ & 0x01u) != 0u)\n"
-"   {\n"
-"      if (dot == 0u || dot == 1u)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x02u) != 0u)\n"
-"   {\n"
-"      if (dot == 2u || dot == 3u)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x04u) != 0u)\n"
-"   {\n"
-"      if (dot == 4u || dot == 5u)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x08u) != 0u)\n"
-"   {\n"
-"      if (dot == 6u || dot == 7u)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x10u) != 0u)\n"
-"   {\n"
-"      if (dot == 8u || dot == 9u)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x20u) != 0u)\n"
-"   {\n"
-"      if (dot == 0xau || dot == 0xbu)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x40u) != 0u)\n"
-"   {\n"
-"      if (dot == 0xcu || dot == 0xdu)\n"
-"         return 1u;\n"
-"   }\n"
-"   if ((specialcode_ & 0x80u) != 0u)\n"
-"   {\n"
-"      if (dot == 0xeu || dot == 0xfu)\n"
-"         return 1u;\n"
-"   }\n"
-"   return 0u;\n"
-"}\n"
+"int PixelIsSpecialPriority( uint specialcode, uint dot ) { \n"
+"  dot &= 0xfu; \n"
+"  if ( (specialcode & 0x01u) != 0u && (dot == 0u || dot == 1u) ){ return 1;} \n"
+"  if ( (specialcode & 0x02u) != 0u && (dot == 2u || dot == 3u) ){ return 1;} \n"
+"  if ( (specialcode & 0x04u) != 0u && (dot == 4u || dot == 5u) ){ return 1;} \n"
+"  if ( (specialcode & 0x08u) != 0u && (dot == 6u || dot == 7u) ){ return 1;} \n"
+"  if ( (specialcode & 0x10u) != 0u && (dot == 8u || dot == 9u) ){ return 1;} \n"
+"  if ( (specialcode & 0x20u) != 0u && (dot == 0xau || dot == 0xbu) ){ return 1;} \n"
+"  if ( (specialcode & 0x40u) != 0u && (dot == 0xcu || dot == 0xdu) ){ return 1;} \n"
+"  if ( (specialcode & 0x80u) != 0u && (dot == 0xeu || dot == 0xfu) ){ return 1;} \n"
+"  return 0; \n"
+"} \n"
 
 "uint Vdp2SetSpecialPriority(uint dot) {\n"
 "  uint prio = priority;\n"
@@ -571,7 +537,7 @@ const char prg_rbg_getcolor_4bpp[] =
 const char prg_rbg_getcolor_8bpp[] =
 "  uint dot = 0u;\n"
 "  uint cramindex = 0u;\n"
-"  uint dotaddr = charaddr + uint((y*cellw)+x);\n"
+"  uint dotaddr = (charaddr + uint((y*cellw)+x))&0x7FFFFu;\n"
 "  dot = vram[ dotaddr >> 2];\n"
 "  if( (dotaddr & 0x3u) == 0u ) dot >>= 0;\n"
 "  else if( (dotaddr & 0x3u) == 1u ) dot >>= 8;\n"
@@ -590,7 +556,7 @@ const char prg_rbg_getcolor_8bpp[] =
 const char prg_rbg_getcolor_16bpp_palette[] =
 "  uint dot = 0u;\n"
 "  uint cramindex = 0u;\n"
-"  uint dotaddr = charaddr + uint((y*cellw)+x) * 2u;\n"
+"  uint dotaddr = (charaddr + uint((y*cellw)+x) * 2u)&0x7FFFFu;\n"
 "  dot = vram[dotaddr>>2]; \n"
 "  if( (dotaddr & 0x02u) != 0u ) { dot >>= 16; } \n"
 "  dot = (((dot) >> 8 & 0xFF) | ((dot) & 0xFF) << 8);\n"
@@ -605,7 +571,7 @@ const char prg_rbg_getcolor_16bpp_palette[] =
 const char prg_rbg_getcolor_16bpp_rbg[] =
 "  uint dot = 0u;\n"
 "  uint cramindex = 0u;\n"
-"  uint dotaddr = charaddr + uint((y*cellw)+x) * 2u;\n"
+"  uint dotaddr = (charaddr + uint((y*cellw)+x) * 2u)&0x7FFFFu;\n"
 "  dot = vram[dotaddr>>2]; \n"
 "  if( (dotaddr & 0x02u) != 0u ) { dot >>= 16; } \n"
 "  dot = (((dot >> 8) & 0xFFu) | ((dot) & 0xFFu) << 8);\n"
@@ -620,7 +586,7 @@ const char prg_rbg_getcolor_16bpp_rbg[] =
 const char prg_rbg_getcolor_32bpp_rbg[] =
 "  uint dot = 0u;\n"
 "  uint cramindex = 0u;\n"
-"  uint dotaddr = charaddr + uint((y*cellw)+x) * 4u;\n"
+"  uint dotaddr = (charaddr + uint((y*cellw)+x) * 4u)&0x7FFFFu;\n"
 "  dot = vram[dotaddr>>2]; \n"
 "  dot = ((dot&0xFF000000u) >> 24 | ((dot >> 8) & 0xFF00u) | ((dot) & 0xFF00u) << 8 | (dot&0x000000FFu) << 24);\n"
 "  if ( (dot&0x80000000u) == 0u && transparencyenable != 0 ) { \n"
@@ -635,19 +601,6 @@ const char prg_generate_rbg_end[] =
 "  if (discarded != 0) imageStore(outSurface,texel,vec4(0.0));\n"
 "  else imageStore(outSurface,texel,vdp2color(alpha, priority_, cc, cramindex));\n"
 "}\n";
-
-const char prg_generate_rbg_line_end[] =
-"  if (discarded != 0) imageStore(outSurface,texel,vec4(0.0));\n"
-"  else {\n"
-"    cramindex |= 0x8000u;\n"
-"    uint line_color = 0u;\n"
-"    if( lineaddr != 0xFFFFFFFFu && lineaddr != 0u ) line_color = ((lineaddr & 0x7Fu) | 0x80u);\n"
-"    cramindex |= (line_color << 16);\n"
-"    imageStore(outSurface,texel,vdp2color(alpha, priority_, cc, cramindex));\n"
-"  }\n"
-"}\n";
-
-
 
 //Powerslave
 const GLchar * a_prg_rbg_0_2w_bitmap[] = {
@@ -717,7 +670,7 @@ const GLchar * a_prg_rbg_1_2w_bitmap[] = {
 
 const GLchar * a_prg_rbg_1_2w_p1_4bpp[] = {
 	prg_generate_rbg,
-	prg_rbg_rpmd0_2w,
+	prg_rbg_rpmd1_2w,
 	prg_rbg_xy,
 	prg_rbg_overmode_repeat,
 	prg_rbg_get_patternaddr,
@@ -728,7 +681,7 @@ const GLchar * a_prg_rbg_1_2w_p1_4bpp[] = {
 
 const GLchar * a_prg_rbg_1_2w_p2_4bpp[] = {
 	prg_generate_rbg,
-	prg_rbg_rpmd0_2w,
+	prg_rbg_rpmd1_2w,
 	prg_rbg_xy,
 	prg_rbg_overmode_repeat,
 	prg_rbg_get_patternaddr,
@@ -739,7 +692,7 @@ const GLchar * a_prg_rbg_1_2w_p2_4bpp[] = {
 
 const GLchar * a_prg_rbg_1_2w_p1_8bpp[] = {
 	prg_generate_rbg,
-	prg_rbg_rpmd0_2w,
+	prg_rbg_rpmd1_2w,
 	prg_rbg_xy,
 	prg_rbg_overmode_repeat,
 	prg_rbg_get_patternaddr,
@@ -749,6 +702,50 @@ const GLchar * a_prg_rbg_1_2w_p1_8bpp[] = {
 	prg_generate_rbg_end };
 
 const GLchar * a_prg_rbg_1_2w_p2_8bpp[] = {
+	prg_generate_rbg,
+	prg_rbg_rpmd1_2w,
+	prg_rbg_xy,
+	prg_rbg_overmode_repeat,
+	prg_rbg_get_patternaddr,
+	prg_rbg_get_pattern_data_2w,
+	prg_rbg_get_charaddr,
+	prg_rbg_getcolor_8bpp,
+	prg_generate_rbg_end };
+
+const GLchar * a_prg_rbg1_1_2w_p1_4bpp[] = {
+	prg_generate_rbg,
+	prg_rbg_rpmd0_2w,
+	prg_rbg_xy,
+	prg_rbg_overmode_repeat,
+	prg_rbg_get_patternaddr,
+	prg_rbg_get_pattern_data_1w,
+	prg_rbg_get_charaddr,
+	prg_rbg_getcolor_4bpp,
+	prg_generate_rbg_end };
+
+const GLchar * a_prg_rbg1_1_2w_p2_4bpp[] = {
+	prg_generate_rbg,
+	prg_rbg_rpmd0_2w,
+	prg_rbg_xy,
+	prg_rbg_overmode_repeat,
+	prg_rbg_get_patternaddr,
+	prg_rbg_get_pattern_data_2w,
+	prg_rbg_get_charaddr,
+	prg_rbg_getcolor_4bpp,
+	prg_generate_rbg_end };
+
+const GLchar * a_prg_rbg1_1_2w_p1_8bpp[] = {
+	prg_generate_rbg,
+	prg_rbg_rpmd0_2w,
+	prg_rbg_xy,
+	prg_rbg_overmode_repeat,
+	prg_rbg_get_patternaddr,
+	prg_rbg_get_pattern_data_1w,
+	prg_rbg_get_charaddr,
+	prg_rbg_getcolor_8bpp,
+	prg_generate_rbg_end };
+
+const GLchar * a_prg_rbg1_1_2w_p2_8bpp[] = {
 	prg_generate_rbg,
 	prg_rbg_rpmd0_2w,
 	prg_rbg_xy,
@@ -889,7 +886,6 @@ struct RBGUniform {
 		window_area_mode = 0;
 		alpha = 0;
 		priority = 0;
-		cram_shift = 1;
 		startLine = 0;
 		endLine = 0;
   }
@@ -915,7 +911,6 @@ struct RBGUniform {
   int window_area_mode;
   unsigned int alpha;
   unsigned int priority;
-  int cram_shift;
 	int startLine;
 	int endLine;
 	unsigned int specialprimode;
@@ -948,6 +943,10 @@ class RBGGenerator{
   GLuint prg_rbg_1_2w_p2_4bpp_ = 0;
   GLuint prg_rbg_1_2w_p1_8bpp_ = 0;
   GLuint prg_rbg_1_2w_p2_8bpp_ = 0;
+	GLuint prg_rbg1_1_2w_p1_4bpp_ = 0;
+	GLuint prg_rbg1_1_2w_p2_4bpp_ = 0;
+	GLuint prg_rbg1_1_2w_p1_8bpp_ = 0;
+	GLuint prg_rbg1_1_2w_p2_8bpp_ = 0;
   GLuint prg_rbg_1_2w_p1_16bpp_p_ = 0;
   GLuint prg_rbg_1_2w_p2_16bpp_p_ = 0;
   GLuint prg_rbg_1_2w_p1_16bpp_ = 0;
@@ -986,70 +985,6 @@ class RBGGenerator{
   GLuint prg_rbg_3_2w_p2_16bpp_ = 0;
   GLuint prg_rbg_3_2w_p1_32bpp_ = 0;
   GLuint prg_rbg_3_2w_p2_32bpp_ = 0;
-
-  GLuint prg_rbg_0_2w_bitmap_4bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_bitmap_8bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_bitmap_16bpp_p_line_ = 0;
-  GLuint prg_rbg_0_2w_bitmap_16bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_bitmap_32bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p1_4bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p2_4bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p1_8bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p2_8bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p1_16bpp_p_line_ = 0;
-  GLuint prg_rbg_0_2w_p2_16bpp_p_line_ = 0;
-  GLuint prg_rbg_0_2w_p1_16bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p2_16bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p1_32bpp_line_ = 0;
-  GLuint prg_rbg_0_2w_p2_32bpp_line_ = 0;
-
-  GLuint prg_rbg_1_2w_bitmap_4bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_bitmap_8bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_bitmap_16bpp_p_line_ = 0;
-  GLuint prg_rbg_1_2w_bitmap_16bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_bitmap_32bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p1_4bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p2_4bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p1_8bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p2_8bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p1_16bpp_p_line_ = 0;
-  GLuint prg_rbg_1_2w_p2_16bpp_p_line_ = 0;
-  GLuint prg_rbg_1_2w_p1_16bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p2_16bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p1_32bpp_line_ = 0;
-  GLuint prg_rbg_1_2w_p2_32bpp_line_ = 0;
-
-  GLuint prg_rbg_2_2w_bitmap_4bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_bitmap_8bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_bitmap_16bpp_p_line_ = 0;
-  GLuint prg_rbg_2_2w_bitmap_16bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_bitmap_32bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p1_4bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p2_4bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p1_8bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p2_8bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p1_16bpp_p_line_ = 0;
-  GLuint prg_rbg_2_2w_p2_16bpp_p_line_ = 0;
-  GLuint prg_rbg_2_2w_p1_16bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p2_16bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p1_32bpp_line_ = 0;
-  GLuint prg_rbg_2_2w_p2_32bpp_line_ = 0;
-
-  GLuint prg_rbg_3_2w_bitmap_4bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_bitmap_8bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_bitmap_16bpp_p_line_ = 0;
-  GLuint prg_rbg_3_2w_bitmap_16bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_bitmap_32bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p1_4bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p2_4bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p1_8bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p2_8bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p1_16bpp_p_line_ = 0;
-  GLuint prg_rbg_3_2w_p2_16bpp_p_line_ = 0;
-  GLuint prg_rbg_3_2w_p1_16bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p2_16bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p1_32bpp_line_ = 0;
-  GLuint prg_rbg_3_2w_p2_32bpp_line_ = 0;
 
   GLuint tex_surface_ = 0;
   GLuint tex_surface_1 = 0;
@@ -1223,6 +1158,11 @@ DEBUGWIP("Init\n");
 	prg_rbg_1_2w_p1_8bpp_ = createProgram(sizeof(a_prg_rbg_1_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_p1_8bpp);
 	prg_rbg_1_2w_p2_8bpp_ = createProgram(sizeof(a_prg_rbg_1_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_p2_8bpp);
 
+	prg_rbg1_1_2w_p1_4bpp_ = createProgram(sizeof(a_prg_rbg1_1_2w_p1_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg1_1_2w_p1_4bpp);
+	prg_rbg1_1_2w_p2_4bpp_ = createProgram(sizeof(a_prg_rbg1_1_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg1_1_2w_p2_4bpp);
+	prg_rbg1_1_2w_p1_8bpp_ = createProgram(sizeof(a_prg_rbg1_1_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg1_1_2w_p1_8bpp);
+	prg_rbg1_1_2w_p2_8bpp_ = createProgram(sizeof(a_prg_rbg1_1_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg1_1_2w_p2_8bpp);
+
 	prg_rbg_2_2w_bitmap_8bpp_ = createProgram(sizeof(a_prg_rbg_2_2w_bitmap) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_bitmap);
 	prg_rbg_2_2w_p1_4bpp_ = createProgram(sizeof(a_prg_rbg_2_2w_p1_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_p1_4bpp);
 	prg_rbg_2_2w_p2_4bpp_ = createProgram(sizeof(a_prg_rbg_2_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_p2_4bpp);
@@ -1234,68 +1174,6 @@ DEBUGWIP("Init\n");
 	prg_rbg_3_2w_p2_4bpp_ = createProgram(sizeof(a_prg_rbg_3_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p2_4bpp);
 	prg_rbg_3_2w_p1_8bpp_ = createProgram(sizeof(a_prg_rbg_3_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p1_8bpp);
 	prg_rbg_3_2w_p2_8bpp_ = createProgram(sizeof(a_prg_rbg_3_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p2_8bpp);
-
-
-	a_prg_rbg_0_2w_bitmap[sizeof(a_prg_rbg_0_2w_bitmap) / sizeof(char*) -1] = prg_generate_rbg_line_end;
-	prg_rbg_0_2w_bitmap_8bpp_line_ = createProgram(sizeof(a_prg_rbg_0_2w_bitmap) / sizeof(char*), (const GLchar**)a_prg_rbg_0_2w_bitmap);
-
-	a_prg_rbg_0_2w_p1_4bpp[sizeof(a_prg_rbg_0_2w_p1_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_0_2w_p1_4bpp_line_ = createProgram(sizeof(a_prg_rbg_0_2w_p1_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_0_2w_p1_4bpp);
-
-	a_prg_rbg_0_2w_p2_4bpp[sizeof(a_prg_rbg_0_2w_p2_4bpp) / sizeof(char*) -1] = prg_generate_rbg_line_end;
-	prg_rbg_0_2w_p2_4bpp_line_ = createProgram(sizeof(a_prg_rbg_0_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_0_2w_p2_4bpp);
-
-	a_prg_rbg_0_2w_p1_8bpp[sizeof(a_prg_rbg_0_2w_p1_8bpp) / sizeof(char*) -1] = prg_generate_rbg_line_end;
-	prg_rbg_0_2w_p1_8bpp_line_ = createProgram(sizeof(a_prg_rbg_0_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_0_2w_p1_8bpp);
-
-	a_prg_rbg_0_2w_p2_8bpp[sizeof(a_prg_rbg_0_2w_p2_8bpp) / sizeof(char*) -1] = prg_generate_rbg_line_end;
-	prg_rbg_0_2w_p2_8bpp_line_ = createProgram(sizeof(a_prg_rbg_0_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_0_2w_p2_8bpp);
-
-	a_prg_rbg_1_2w_bitmap[sizeof(a_prg_rbg_1_2w_bitmap) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_1_2w_bitmap_8bpp_line_ = createProgram(sizeof(a_prg_rbg_1_2w_bitmap) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_bitmap);
-
-	a_prg_rbg_1_2w_p1_4bpp[sizeof(a_prg_rbg_1_2w_p1_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_1_2w_p1_4bpp_line_ = createProgram(sizeof(a_prg_rbg_1_2w_p1_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_p1_4bpp);
-
-	a_prg_rbg_1_2w_p2_4bpp[sizeof(a_prg_rbg_1_2w_p2_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_1_2w_p2_4bpp_line_ = createProgram(sizeof(a_prg_rbg_1_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_p2_4bpp);
-
-	a_prg_rbg_1_2w_p1_8bpp[sizeof(a_prg_rbg_1_2w_p1_8bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_1_2w_p1_8bpp_line_ = createProgram(sizeof(a_prg_rbg_1_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_p1_8bpp);
-
-	a_prg_rbg_1_2w_p2_8bpp[sizeof(a_prg_rbg_1_2w_p2_8bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_1_2w_p2_8bpp_line_ = createProgram(sizeof(a_prg_rbg_1_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_1_2w_p2_8bpp);
-
-	a_prg_rbg_2_2w_bitmap[sizeof(a_prg_rbg_2_2w_bitmap) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_2_2w_bitmap_8bpp_line_ = createProgram(sizeof(a_prg_rbg_2_2w_bitmap) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_bitmap);
-
-	a_prg_rbg_2_2w_p1_4bpp[sizeof(a_prg_rbg_2_2w_p1_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_2_2w_p1_4bpp_line_ = createProgram(sizeof(a_prg_rbg_2_2w_p1_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_p1_4bpp);
-
-	a_prg_rbg_2_2w_p2_4bpp[sizeof(a_prg_rbg_2_2w_p2_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_2_2w_p2_4bpp_line_ = createProgram(sizeof(a_prg_rbg_2_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_p2_4bpp);
-
-	a_prg_rbg_2_2w_p1_8bpp[sizeof(a_prg_rbg_2_2w_p1_8bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_2_2w_p1_8bpp_line_ = createProgram(sizeof(a_prg_rbg_2_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_p1_8bpp);
-
-	a_prg_rbg_2_2w_p2_8bpp[sizeof(a_prg_rbg_2_2w_p2_8bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_2_2w_p2_8bpp_line_ = createProgram(sizeof(a_prg_rbg_2_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_2_2w_p2_8bpp);
-
-	a_prg_rbg_3_2w_bitmap[sizeof(a_prg_rbg_3_2w_bitmap) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_3_2w_bitmap_8bpp_line_ = createProgram(sizeof(a_prg_rbg_3_2w_bitmap) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_bitmap);
-
-	a_prg_rbg_3_2w_p1_4bpp[sizeof(a_prg_rbg_3_2w_p1_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_3_2w_p1_4bpp_line_ = createProgram(sizeof(a_prg_rbg_3_2w_p1_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p1_4bpp);
-
-	a_prg_rbg_3_2w_p2_4bpp[sizeof(a_prg_rbg_3_2w_p2_4bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_3_2w_p2_4bpp_line_ = createProgram(sizeof(a_prg_rbg_3_2w_p2_4bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p2_4bpp);
-
-	a_prg_rbg_3_2w_p1_8bpp[sizeof(a_prg_rbg_3_2w_p1_8bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_3_2w_p1_8bpp_line_ = createProgram(sizeof(a_prg_rbg_3_2w_p1_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p1_8bpp);
-
-	a_prg_rbg_3_2w_p2_8bpp[sizeof(a_prg_rbg_3_2w_p2_8bpp) / sizeof(char*) - 1] = prg_generate_rbg_line_end;
-	prg_rbg_3_2w_p2_8bpp_line_ = createProgram(sizeof(a_prg_rbg_3_2w_p2_8bpp) / sizeof(char*), (const GLchar**)a_prg_rbg_3_2w_p2_8bpp);
-
   }
 
   bool ErrorHandle(const char* name)
@@ -1340,381 +1218,6 @@ DEBUGWIP("Init\n");
 
   //-----------------------------------------------
   void updateRBG0( RBGDrawInfo * rbg, Vdp2 *varVdp2Regs) {
-		// Line color insersion
-		if (rbg->info.LineColorBase != 0 && VDP2_CC_NONE != (rbg->info.blendmode & 0x03)) {
-			if (varVdp2Regs->RPMD == 0 || (varVdp2Regs->RPMD == 3 && (varVdp2Regs->WCTLD & 0xA) == 0)) {
-				if (rbg->info.isbitmap) {
-					DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_bitmap_8bpp_line_);
-				}
-				else {
-					if (rbg->info.patterndatasize == 1) {
-						switch (rbg->info.colornumber) {
-						case 0: { // Decathalete ToDo: Line Color Bug
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p1_4bpp_line_);
-							break;
-						}
-						case 1: { // Sakatuku 2 Ground, GUNDAM Side Story 2, SonicR ToDo: 2Player
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p1_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_0_2w_p1_16bpp_p_line_ == 0) {
-								prg_rbg_0_2w_p1_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p1_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_0_2w_p1_16bpp_line_ == 0) {
-								prg_rbg_0_2w_p1_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p1_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_0_2w_p1_32bpp_line_ == 0) {
-								prg_rbg_0_2w_p1_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p1_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p1_32bpp_line_);
-							break;
-						}
-						}
-					}
-					else {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p2_4bpp_line_);
-							break;
-						}
-						case 1: { // Thunder Force V
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p2_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_0_2w_p2_16bpp_p_line_ == 0) {
-								prg_rbg_0_2w_p2_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p2_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_0_2w_p2_16bpp_line_ == 0) {
-								prg_rbg_0_2w_p2_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p2_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_0_2w_p2_32bpp_line_ == 0) {
-								prg_rbg_0_2w_p2_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p2_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_0_2w_p2_32bpp_line_);
-							break;
-						}
-						}
-					}
-				}
-			}
-			else if (varVdp2Regs->RPMD == 1) {
-				if (rbg->info.isbitmap) {
-					DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_bitmap_8bpp_line_);
-				}
-				else {
-					if (rbg->info.patterndatasize == 1) {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_1_2w_p1_16bpp_p_line_ == 0) {
-								prg_rbg_1_2w_p1_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_1_2w_p1_16bpp_line_ == 0) {
-								prg_rbg_1_2w_p1_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_1_2w_p1_32bpp_line_ == 0) {
-								prg_rbg_1_2w_p1_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p1_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_32bpp_line_);
-							break;
-						}
-						}
-					}
-					else {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_1_2w_p2_16bpp_p_line_ == 0) {
-								prg_rbg_1_2w_p2_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_1_2w_p2_16bpp_line_ == 0) {
-								prg_rbg_1_2w_p2_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_1_2w_p2_32bpp_line_ == 0) {
-								prg_rbg_1_2w_p2_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p2_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_32bpp_line_);
-							break;
-						}
-						}
-					}
-				}
-			}
-			else if (varVdp2Regs->RPMD == 2) {
-				if (rbg->info.isbitmap) {
-					DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_bitmap_8bpp_line_);
-				}
-				else {
-					if (rbg->info.patterndatasize == 1) {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p1_4bpp_line_);
-							break;
-						}
-						case 1: { // Panzer Dragoon 1
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p1_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_2_2w_p1_16bpp_p_line_ == 0) {
-								prg_rbg_2_2w_p1_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_2_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p1_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_2_2w_p1_16bpp_line_ == 0) {
-								prg_rbg_2_2w_p1_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_2_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p1_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_2_2w_p1_32bpp_line_ == 0) {
-								prg_rbg_2_2w_p1_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_2_2w_p1_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p1_32bpp_line_);
-							break;
-						}
-						}
-					}
-					else {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p2_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p2_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_2_2w_p2_16bpp_p_line_ == 0) {
-								prg_rbg_2_2w_p2_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_2_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p2_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_2_2w_p2_16bpp_line_ == 0) {
-								prg_rbg_2_2w_p2_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_2_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p2_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_2_2w_p2_32bpp_line_ == 0) {
-								prg_rbg_2_2w_p2_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_2_2w_p2_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_2_2w_p2_32bpp_line_);
-							break;
-						}
-						}
-					}
-				}
-			}
-			else if (varVdp2Regs->RPMD == 3) {
-
-				if (rbg->info.isbitmap) {
-					DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_bitmap_8bpp_line_);
-				}
-				else {
-					if (rbg->info.patterndatasize == 1) {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p1_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p1_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_3_2w_p1_16bpp_p_line_ == 0) {
-								prg_rbg_3_2w_p1_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_3_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p1_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_3_2w_p1_16bpp_line_ == 0) {
-								prg_rbg_3_2w_p1_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_3_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p1_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_3_2w_p1_32bpp_line_ == 0) {
-								prg_rbg_3_2w_p1_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_3_2w_p1_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p1_32bpp_line_);
-							break;
-						}
-						}
-					}
-					else {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p2_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p2_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_3_2w_p2_16bpp_p_line_ == 0) {
-								prg_rbg_3_2w_p2_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_3_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p2_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_3_2w_p2_16bpp_line_ == 0) {
-								prg_rbg_3_2w_p2_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_3_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p2_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_3_2w_p2_32bpp_line_ == 0) {
-								prg_rbg_3_2w_p2_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_3_2w_p2_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_3_2w_p2_32bpp_line_);
-							break;
-						}
-						}
-					}
-				}
-				// glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_window_);
-				// glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vdp2WindowInfo)*rbg->vres, (void*)rbg->info.pWinInfo);
-				// glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, ssbo_window_);
-			}
-
-		}
-
-		// no line color insersion
-		else {
 			if (varVdp2Regs->RPMD == 0 || (varVdp2Regs->RPMD == 3 && (varVdp2Regs->WCTLD & 0xA) == 0) ) {
 				if (rbg->info.isbitmap) {
 					switch (rbg->info.colornumber) {
@@ -2267,106 +1770,9 @@ DEBUGWIP("Init\n");
 				// glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vdp2WindowInfo)*rbg->vres, (void*)rbg->info.pWinInfo);
 				// glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, ssbo_window_);
 			}
-		}
-
 	}
 
 	void updateRBG1( RBGDrawInfo * rbg, Vdp2 *varVdp2Regs) {
-		// Line color insersion
-		if (rbg->info.LineColorBase != 0 && VDP2_CC_NONE != (rbg->info.blendmode & 0x03)) {
-				if (rbg->info.isbitmap) {
-					DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_bitmap_8bpp_line_);
-				}
-				else {
-					if (rbg->info.patterndatasize == 1) {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_1_2w_p1_16bpp_p_line_ == 0) {
-								prg_rbg_1_2w_p1_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_1_2w_p1_16bpp_line_ == 0) {
-								prg_rbg_1_2w_p1_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p1_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_1_2w_p1_32bpp_line_ == 0) {
-								prg_rbg_1_2w_p1_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_0_2w_p1_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_32bpp_line_);
-							break;
-						}
-						}
-					}
-					else {
-						switch (rbg->info.colornumber) {
-						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_4bpp_line_);
-							break;
-						}
-						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_8bpp_line_);
-							break;
-						}
-						case 2: {
-							if (prg_rbg_1_2w_p2_16bpp_p_line_ == 0) {
-								prg_rbg_1_2w_p2_16bpp_p_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_palette,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_16bpp_p_line_);
-							break;
-						}
-						case 3: {
-							if (prg_rbg_1_2w_p2_16bpp_line_ == 0) {
-								prg_rbg_1_2w_p2_16bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p2_4bpp),
-									prg_rbg_getcolor_16bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_16bpp_line_);
-							break;
-						}
-						case 4: {
-							if (prg_rbg_1_2w_p2_32bpp_line_ == 0) {
-								prg_rbg_1_2w_p2_32bpp_line_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p2_4bpp),
-									prg_rbg_getcolor_32bpp_rbg,
-									prg_generate_rbg_line_end);
-							}
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p2_32bpp_line_);
-							break;
-						}
-						}
-					}
-				}
-			}
-
-		// no line color insersion
-		else {
 			if (varVdp2Regs->RPMD == 0 || (varVdp2Regs->RPMD == 3 && (varVdp2Regs->WCTLD & 0xA) == 0) ) {
 				if (rbg->info.isbitmap) {
 					switch (rbg->info.colornumber) {
@@ -2505,7 +1911,7 @@ DEBUGWIP("Init\n");
 					}
 				}
 			}
-
+      else {
 				if (rbg->info.isbitmap) {
 					switch (rbg->info.colornumber) {
 					case 0: {
@@ -2558,17 +1964,17 @@ DEBUGWIP("Init\n");
 					if (rbg->info.patterndatasize == 1) {
 						switch (rbg->info.colornumber) {
 						case 0: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_4bpp_);
+							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg1_1_2w_p1_4bpp_);
 							break;
 						}
 						case 1: {
-							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg_1_2w_p1_8bpp_);
+							DEBUGWIP("prog %d\n", __LINE__);glUseProgram(prg_rbg1_1_2w_p1_8bpp_);
 							break;
 						}
 						case 2: {
 							if (prg_rbg_1_2w_p1_16bpp_p_ == 0) {
 								prg_rbg_1_2w_p1_16bpp_p_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p1_4bpp),
+									S(a_prg_rbg1_1_2w_p1_4bpp),
 									prg_rbg_getcolor_16bpp_palette,
 									prg_generate_rbg_end);
 							}
@@ -2578,7 +1984,7 @@ DEBUGWIP("Init\n");
 						case 3: {
 							if (prg_rbg_1_2w_p1_16bpp_ == 0) {
 								prg_rbg_1_2w_p1_16bpp_ = compile_color_dot(
-									S(a_prg_rbg_1_2w_p1_4bpp),
+									S(a_prg_rbg1_1_2w_p1_4bpp),
 									prg_rbg_getcolor_16bpp_rbg,
 									prg_generate_rbg_end);
 							}
@@ -2641,11 +2047,10 @@ DEBUGWIP("Init\n");
 					}
 				}
 			}
-
 	}
 
  void update( RBGDrawInfo * rbg, Vdp2 *varVdp2Regs) {
-    if (prg_rbg_0_2w_p1_4bpp_line_ == 0) return;
+    if (prg_rbg_0_2w_p1_4bpp_ == 0) return;
 
     GLuint error;
     int local_size_x = 4;
@@ -2657,7 +2062,7 @@ DEBUGWIP("Init\n");
     error = glGetError();
 
     if (rbg->info.idScreen == RBG0) updateRBG0(rbg, varVdp2Regs);
-               else updateRBG1(rbg, varVdp2Regs);
+    else updateRBG1(rbg, varVdp2Regs);
 
        ErrorHandle("glUseProgram");
 
@@ -2703,8 +2108,8 @@ DEBUGWIP("Init\n");
        ErrorHandle("glBufferSubData");
        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_paraA_);
 
-       uniform.vres_scale = (float)1.0f/_Ygl->heightRatio;
-       uniform.hres_scale = (float)1.0f/_Ygl->widthRatio;
+       uniform.vres_scale = 1.0f/(float)_Ygl->heightRatio;
+       uniform.hres_scale = 1.0f/(float)_Ygl->widthRatio;
        uniform.cellw = rbg->info.cellw;
        uniform.cellh = rbg->info.cellh;
        uniform.paladdr_ = rbg->info.paladdr;
@@ -2725,14 +2130,6 @@ DEBUGWIP("Init\n");
        uniform.window_area_mode = rbg->info.RotWinMode;
        uniform.alpha = rbg->info.alpha;
        uniform.priority = rbg->info.priority;
-
-       if (Vdp2Internal.ColorMode < 2) {
-               uniform.cram_shift = 1;
-       }
-       else {
-               uniform.cram_shift = 2;
-       }
-
        uniform.startLine = rbg->info.startLine;
        uniform.endLine = rbg->info.endLine;
        uniform.specialprimode = rbg->info.specialprimode;
@@ -2744,12 +2141,12 @@ DEBUGWIP("Init\n");
   glBindBufferBase(GL_UNIFORM_BUFFER, 3, scene_uniform);
 
        if (rbg->rgb_type == 0x04  ) {
-               DEBUGWIP("Draw RBG1\n");
+               DEBUGWIP("Draw RBG1 [%d -> %d]\n", uniform.startLine, uniform.endLine);
                glBindImageTexture(0, tex_surface_1, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
                ErrorHandle("glBindImageTexture 1");
         }
        else {
-               DEBUGWIP("Draw RBG0\n");
+               DEBUGWIP("Draw RBG0 [%d -> %d]\n", uniform.startLine, uniform.endLine);
                glBindImageTexture(0, tex_surface_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
                ErrorHandle("glBindImageTexture 0");
        }

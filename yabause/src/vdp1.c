@@ -38,6 +38,7 @@
 u8 * Vdp1Ram;
 int vdp1Ram_update_start;
 int vdp1Ram_update_end;
+int VDP1_MASK = 0xFFFF;
 
 VideoInterface_struct *VIDCore=NULL;
 extern VideoInterface_struct *VIDCoreList[];
@@ -45,6 +46,8 @@ extern YabEventQueue * rcv_evqueue;
 
 Vdp1 * Vdp1Regs;
 Vdp1External_struct Vdp1External;
+
+static int needVdp1draw = 0;
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -133,11 +136,11 @@ u32 FASTCALL Vdp1FrameBufferReadLong(SH2_struct *context, u8* mem, u32 addr) {
 //////////////////////////////////////////////////////////////////////////////
 
 void FASTCALL Vdp1FrameBufferWriteByte(SH2_struct *context, u8* mem, u32 addr, u8 val) {
-   addr &= 0x3FFFF;
+   addr &= 0x7FFFF;
 
    if (VIDCore->Vdp1WriteFrameBuffer)
    {
-      VIDCore->Vdp1WriteFrameBuffer(0, addr, val);
+      if (addr < 0x40000) VIDCore->Vdp1WriteFrameBuffer(0, addr, val);
       return;
    }
 }
@@ -145,11 +148,11 @@ void FASTCALL Vdp1FrameBufferWriteByte(SH2_struct *context, u8* mem, u32 addr, u
 //////////////////////////////////////////////////////////////////////////////
 
 void FASTCALL Vdp1FrameBufferWriteWord(SH2_struct *context, u8* mem, u32 addr, u16 val) {
-   addr &= 0x3FFFF;
+  addr &= 0x7FFFF;
 
    if (VIDCore->Vdp1WriteFrameBuffer)
    {
-      VIDCore->Vdp1WriteFrameBuffer(1, addr, val);
+      if (addr < 0x40000) VIDCore->Vdp1WriteFrameBuffer(1, addr, val);
       return;
    }
 }
@@ -157,12 +160,12 @@ void FASTCALL Vdp1FrameBufferWriteWord(SH2_struct *context, u8* mem, u32 addr, u
 //////////////////////////////////////////////////////////////////////////////
 
 void FASTCALL Vdp1FrameBufferWriteLong(SH2_struct *context, u8* mem, u32 addr, u32 val) {
-   addr &= 0x3FFFF;
+  addr &= 0x7FFFF;
 
    if (VIDCore->Vdp1WriteFrameBuffer)
    {
-      VIDCore->Vdp1WriteFrameBuffer(2, addr, val);
-      return;
+     if (addr < 0x40000) VIDCore->Vdp1WriteFrameBuffer(2, addr, val);
+     return;
    }
 }
 
@@ -182,6 +185,8 @@ int Vdp1Init(void) {
    Vdp1Regs->TVMR = 0;
    Vdp1Regs->FBCR = 0;
    Vdp1Regs->PTMR = 0;
+
+   VDP1_MASK = 0xFFFF;
 
    vdp1Ram_update_start = 0x0;
    vdp1Ram_update_end = 0x80000;
@@ -265,6 +270,7 @@ void Vdp1Reset(void) {
    Vdp1Regs->EWLR = 0;
    Vdp1Regs->EWRR = 0;
    Vdp1Regs->ENDR = 0;
+   VDP1_MASK = 0xFFFF;
    VIDCore->Vdp1Reset();
 }
 
@@ -284,7 +290,6 @@ u8 FASTCALL Vdp1ReadByte(SH2_struct *context, u8* mem, u32 addr) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
-u16 COPR[313*(int)(DECILINE_STEP)];
 
 u16 FASTCALL Vdp1ReadWord(SH2_struct *context, u8* mem, u32 addr) {
    addr &= 0xFF;
@@ -297,8 +302,7 @@ u16 FASTCALL Vdp1ReadWord(SH2_struct *context, u8* mem, u32 addr) {
          return Vdp1Regs->LOPR;
       case 0x14:
         FRAMELOG("Read COPR %X line = %d\n", Vdp1Regs->COPR, yabsys.LineCount);
-         //return Vdp1Regs->COPR;
-         return COPR[(yabsys.LineCount-1)*20 + yabsys.DecilineCount];
+         return Vdp1Regs->COPR;
       case 0x16:
          return 0x1000 | ((Vdp1Regs->PTMR & 2) << 7) | ((Vdp1Regs->FBCR & 0x1E) << 3) | (Vdp1Regs->TVMR & 0xF);
       default:
@@ -344,7 +348,14 @@ void updateFBMode() {
     Vdp1External.manualerase |= ((Vdp1Regs->FBCR & 3) == 2);
     Vdp1External.manualchange = ((Vdp1Regs->FBCR & 3) == 3);
   }
-  Vdp1External.manualerase |= Vdp1External.manualchange;
+  // Vdp1External.manualerase |= Vdp1External.manualchange;
+}
+
+static void Vdp1TryDraw(void) {
+  if ((needVdp1draw == 1)) {
+    Vdp1Draw();
+    needVdp1draw = 0;
+  }
 }
 
 void FASTCALL Vdp1WriteWord(SH2_struct *context, u8* mem, u32 addr, u16 val) {
@@ -361,13 +372,15 @@ void FASTCALL Vdp1WriteWord(SH2_struct *context, u8* mem, u32 addr, u16 val) {
       updateFBMode();
       break;
     case 0x4:
-      FRAMELOG("Write PTMR %X line = %d\n", val, yabsys.LineCount);
+      FRAMELOG("Write PTMR %X line = %d %d\n", val, yabsys.LineCount, yabsys.VBlankLineCount);
       Vdp1Regs->PTMR = val;
-      Vdp1External.plot_trigger_line = 0;
-      if ((val == 1) && (yabsys.LineCount != 0) ){
+      Vdp1External.plot_trigger_line = -1;
+      Vdp1External.plot_trigger_done = 0;
+      if (val == 1){
         FRAMELOG("VDP1: VDPEV_DIRECT_DRAW\n");
         Vdp1External.plot_trigger_line = yabsys.LineCount;
-        Vdp1Draw();
+        needVdp1draw = 1;
+        Vdp1TryDraw();
         Vdp1External.plot_trigger_done = 1;
       }
       break;
@@ -396,33 +409,14 @@ void FASTCALL Vdp1WriteLong(SH2_struct *context, u8* mem, u32 addr, UNUSED u32 v
 }
 
 //////////////////////////////////////////////////////////////////////////////
-void setupCOPR(u16 *addr, u32 commandCounter) {
-  float step = (float)((yabsys.MaxLineCount - yabsys.LineCount) * DECILINE_STEP) / (float)(commandCounter+1);
-  for (int i=0; i<yabsys.LineCount*DECILINE_STEP; i++) {
-    COPR[i] = 0;
-  }
-  float hstep = step;
-  int p = 0;
-  for (int i=yabsys.LineCount*DECILINE_STEP; i< yabsys.MaxLineCount*DECILINE_STEP; i++) {
-    COPR[i] = addr[p];
-    hstep -= 1.0;
-    if (hstep < 0.0) {
-      hstep += step;
-      p++;
-    }
-  }
-}
 
 void Vdp1DrawCommands(u8 * ram, Vdp1 * regs, u8* back_framebuffer)
 {
-   u16 addr[2000];
-   u16 command = T1ReadWord(ram, regs->addr);
+   u16 command = Vdp1RamReadWord(NULL, ram, regs->addr);
    u32 commandCounter = 0;
    u32 returnAddr = 0xffffffff;
-
-   addr[commandCounter] = regs->addr >> 3;
-
    while (!(command & 0x8000) && commandCounter < 2000) { // fix me
+      regs->COPR = (regs->addr & 0x7FFFF) >> 3;
       // First, process the command
       if (!(command & 0x4000)) { // if (!skip)
          switch (command & 0x000F) {
@@ -460,18 +454,15 @@ void Vdp1DrawCommands(u8 * ram, Vdp1 * regs, u8* back_framebuffer)
          default: // Abort
             VDP1LOG("vdp1\t: Bad command: %x\n", command);
             regs->EDSR |= 2;
-            regs->LOPR = regs->addr >> 3;
-            addr[commandCounter] = regs->addr >> 3;
-            setupCOPR(&addr[0], commandCounter);
+            regs->COPR = (regs->addr & 0x7FFFF) >> 3;
             return;
          }
       }
 
 	  // Force to quit internal command error( This technic(?) is used by BATSUGUN )
 	  if (regs->EDSR & 0x02){
-		  regs->LOPR = regs->addr >> 3;
-		  addr[commandCounter] = regs->addr >> 3;
-      setupCOPR(&addr[0], commandCounter);
+
+		  regs->COPR = (regs->addr & 0x7FFFF) >> 3;
 		  return;
 	  }
 
@@ -499,11 +490,13 @@ void Vdp1DrawCommands(u8 * ram, Vdp1 * regs, u8* back_framebuffer)
          break;
       }
 
-      command = T1ReadWord(ram, regs->addr);
-      addr[commandCounter] = regs->addr >> 3;
+      command = Vdp1RamReadWord(NULL,ram, regs->addr);
+      //If we change directly CPR to last value, scorcher will not boot.
+      //If we do not change it, Noon will not start
+      //So store the value and update COPR with last value at VBlank In
+      regs->lCOPR = (regs->addr & 0x7FFFF) >> 3;
       commandCounter++;
    }
-   setupCOPR(&addr[0], commandCounter-1);
 }
 
 //ensure that registers are set correctly
@@ -540,7 +533,6 @@ void Vdp1FakeDrawCommands(u8 * ram, Vdp1 * regs)
          default: // Abort
             VDP1LOG("vdp1\t: Bad command: %x\n", command);
             regs->EDSR |= 2;
-            regs->LOPR = regs->addr >> 3;
             regs->COPR = regs->addr >> 3;
             return;
          }
@@ -577,7 +569,7 @@ void Vdp1FakeDrawCommands(u8 * ram, Vdp1 * regs)
 
 void Vdp1Draw(void)
 {
-  FRAMELOG("Vdp1Draw");
+  FRAMELOG("Vdp1Draw\n");
   Vdp1Regs->EDSR >>= 1;
    if (!Vdp1External.disptoggle)
    {
@@ -591,11 +583,12 @@ void Vdp1Draw(void)
      //Vdp1Regs->EDSR >>= 1;
      /* this should be done after a frame change or a plot trigger */
      Vdp1Regs->COPR = 0;
+     Vdp1Regs->lCOPR = 0;
 
      VIDCore->Vdp1Draw();
    }
 
-   FRAMELOG("Vdp1Draw end at %d line", yabsys.LineCount);
+   FRAMELOG("Vdp1Draw end at %d line\n", yabsys.LineCount);
    Vdp1Regs->EDSR |= 2;
    ScuSendDrawEnd();
 
@@ -610,6 +603,7 @@ void Vdp1NoDraw(void) {
    //Vdp1Regs->EDSR >>= 1;
    /* this should be done after a frame change or a plot trigger */
    Vdp1Regs->COPR = 0;
+   Vdp1Regs->lCOPR = 0;
 
    Vdp1FakeDrawCommands(Vdp1Ram, Vdp1Regs);
 }
@@ -996,41 +990,39 @@ void Vdp1DebugCommand(u32 number, char *outstring)
          AddString(outstring, "Transparent Pixel Enabled\r\n");
       }
 
-      AddString(outstring, "Color mode: ");
+      if (cmd.CMDCTRL & 0x0004){
+          AddString(outstring, "Non-textured color: %04X\r\n", cmd.CMDCOLR);
+      } else {
+          AddString(outstring, "Color mode: ");
 
-      switch ((cmd.CMDPMOD >> 3) & 0x7)
-      {
-         case 0:
-            AddString(outstring, "4 BPP(16 color bank)\r\n");
-            AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR << 3));
-            break;
-         case 1:
-            AddString(outstring, "4 BPP(16 color LUT)\r\n");
-            AddString(outstring, "Color lookup table: %08X\r\n", (cmd.CMDCOLR << 3));
-            break;
-         case 2:
-            AddString(outstring, "8 BPP(64 color bank)\r\n");
-            AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR << 3));
-            break;
-         case 3:
-            AddString(outstring, "8 BPP(128 color bank)\r\n");
-            AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR << 3));
-            break;
-         case 4:
-            AddString(outstring, "8 BPP(256 color bank)\r\n");
-            AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR << 3));
-            break;
-         case 5:
-            AddString(outstring, "15 BPP(RGB)\r\n");
-
-            // Only non-textured commands
-            if (cmd.CMDCTRL & 0x0004)
-            {
-               AddString(outstring, "Non-textured color: %04X\r\n", cmd.CMDCOLR);
-            }
-            break;
-         default: break;
-      }
+          switch ((cmd.CMDPMOD >> 3) & 0x7)
+          {
+             case 0:
+                AddString(outstring, "4 BPP(16 color bank)\r\n");
+                AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR));
+                break;
+             case 1:
+                AddString(outstring, "4 BPP(16 color LUT)\r\n");
+                AddString(outstring, "Color lookup table: %08X\r\n", (cmd.CMDCOLR));
+                break;
+             case 2:
+                AddString(outstring, "8 BPP(64 color bank)\r\n");
+                AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR));
+                break;
+             case 3:
+                AddString(outstring, "8 BPP(128 color bank)\r\n");
+                AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR));
+                break;
+             case 4:
+                AddString(outstring, "8 BPP(256 color bank)\r\n");
+                AddString(outstring, "Color bank: %08X\r\n", (cmd.CMDCOLR));
+                break;
+             case 5:
+                AddString(outstring, "15 BPP(RGB)\r\n");
+                break;
+             default: break;
+          }
+        }
 
       AddString(outstring, "Color Calc. mode: ");
 
@@ -1436,7 +1428,7 @@ void VIDDummyDeInit(void);
 void VIDDummyResize(int, int, unsigned int, unsigned int, int);
 int VIDDummyIsFullscreen(void);
 int VIDDummyVdp1Reset(void);
-void VIDDummyVdp1Draw(void);
+void VIDDummyVdp1Draw();
 void VIDDummyVdp1NormalSpriteDraw(u8 * ram, Vdp1 * regs, u8* back_framebuffer);
 void VIDDummyVdp1ScaledSpriteDraw(u8 * ram, Vdp1 * regs, u8* back_framebuffer);
 void VIDDummyVdp1DistortedSpriteDraw(u8 * ram, Vdp1 * regs, u8* back_framebuffer);
@@ -1522,7 +1514,7 @@ int VIDDummyVdp1Reset(void)
 
 //////////////////////////////////////////////////////////////////////////////
 
-void VIDDummyVdp1Draw(void)
+void VIDDummyVdp1Draw()
 {
 }
 
@@ -1628,14 +1620,6 @@ void VIDDummyVdp2DispOff(void)
 {
 }
 
-//////////////////////////////////////////////////////////////////////////////
-
-void Vdp1HBlankIN(void)
-{
-#if defined(HAVE_LIBGL) || defined(__ANDROID__) || defined(IOS)
-  YglTMCheck();
-#endif
-}
 
 //////////////////////////////////////////////////////////////////////////////
 static void startField(void) {
@@ -1643,7 +1627,7 @@ static void startField(void) {
 
   yabsys.wait_line_count = -1;
 
-  FRAMELOG("***** VOUT(T) %d FCM=%d FCT=%d VBE=%d PTMR=%d (%d, %d, %d, %d)*****\n", Vdp1External.swap_frame_buffer, (Vdp1Regs->FBCR & 0x02) >> 1, (Vdp1Regs->FBCR & 0x01), (Vdp1Regs->TVMR >> 3) & 0x01, Vdp1Regs->PTMR, Vdp1External.onecyclemode, Vdp1External.manualchange, Vdp1External.manualerase, Vdp1External.vblank_erase);
+  FRAMELOG("StartField ***** VOUT(T) %d FCM=%d FCT=%d VBE=%d PTMR=%d (%d, %d, %d, %d)*****\n", Vdp1External.swap_frame_buffer, (Vdp1Regs->FBCR & 0x02) >> 1, (Vdp1Regs->FBCR & 0x01), (Vdp1Regs->TVMR >> 3) & 0x01, Vdp1Regs->PTMR, Vdp1External.onecyclemode, Vdp1External.manualchange, Vdp1External.manualerase, Vdp1External.vblank_erase);
 
   // Manual Change
   Vdp1External.swap_frame_buffer |= (Vdp1External.manualchange == 1);
@@ -1652,6 +1636,7 @@ static void startField(void) {
   // Frame Change
   if (Vdp1External.swap_frame_buffer == 1)
   {
+    FRAMELOG("Swap Line %d\n", yabsys.LineCount);
     if ((Vdp1External.manualerase == 1) || (Vdp1External.onecyclemode == 1))
     {
       VIDCore->Vdp1EraseWrite();
@@ -1660,6 +1645,9 @@ static void startField(void) {
 
     VIDCore->Vdp1FrameChange();
     Vdp1External.current_frame = !Vdp1External.current_frame;
+    Vdp1Regs->LOPR = Vdp1Regs->COPR;
+    Vdp1Regs->COPR = 0;
+    Vdp1Regs->lCOPR = 0;
     Vdp1Regs->EDSR >>= 1;
 
     FRAMELOG("[VDP1] Displayed framebuffer changed. EDSR=%02X", Vdp1Regs->EDSR);
@@ -1668,53 +1656,58 @@ static void startField(void) {
 
     // if Plot Trigger mode == 0x02 draw start
     if (Vdp1Regs->PTMR == 0x2){
-      FRAMELOG("[VDP1] PTMR == 0x2 start drawing immidiatly");
-      yabsys.wait_line_count = 1;
+      FRAMELOG("[VDP1] PTMR == 0x2 start drawing immidiatly\n");
+      needVdp1draw = 1;
     }
-
+    if (Vdp1Regs->PTMR == 0x1) Vdp1External.plot_trigger_done = 0;
   }
+
+  FRAMELOG("End StartField\n");
 
   Vdp1External.manualchange = 0;
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
-void Vdp1HBlankOUT(void)
+void Vdp1HBlankIN(void)
 {
-  if ((Vdp1Regs->PTMR == 1) && ((Vdp1External.plot_trigger_line + 1) == yabsys.LineCount)) {
-    if (Vdp1External.plot_trigger_done == 0) {
-      FRAMELOG("VDP1: VDPEV_DIRECT_DRAW\n");
-      Vdp1Draw();
-    } else {
-      Vdp1External.plot_trigger_done = 0;
-    }
-    if (yabsys.LineCount == 0){
-      startField();
-    }
-  } else {
-    if (yabsys.LineCount == 0){
-      startField();
-    }
-    else if (yabsys.wait_line_count != -1 && yabsys.LineCount == yabsys.wait_line_count) {
-
-      Vdp1Draw();
-      FRAMELOG("Vdp1Draw end at %d line EDSR=%02X", yabsys.LineCount, Vdp1Regs->EDSR);
+  if(yabsys.LineCount == 0) {
+    startField();
+  }
+  if (Vdp1Regs->PTMR == 0x1){
+    if (Vdp1External.plot_trigger_line == yabsys.LineCount){
+      if(Vdp1External.plot_trigger_done == 0) {
+        needVdp1draw = 1;
+        Vdp1External.plot_trigger_done = 1;
+      }
     }
   }
+  #if defined(HAVE_LIBGL) || defined(__ANDROID__) || defined(IOS)
+  YglTMCheck();
+  #endif
+}
+//////////////////////////////////////////////////////////////////////////////
+
+void Vdp1HBlankOUT(void)
+{
+  Vdp1TryDraw();
+
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 void Vdp1VBlankIN(void)
 {
+  Vdp1Regs->COPR = Vdp1Regs->lCOPR;
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 void Vdp1VBlankOUT(void)
 {
+  //Out of VBlankOut : Break Batman
   if (needVBlankErase()) {
-       VIDCore->Vdp1EraseWrite();
+    VIDCore->Vdp1EraseWrite();
   }
   Vdp1External.vblank_erase = 0;
 }

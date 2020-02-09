@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "vdp1.h"
+#include "yui.h"
 
 //#define VDP1CDEBUG
 #ifdef VDP1CDEBUG
@@ -31,19 +32,21 @@ static int work_groups_y;
 static vdp1cmd_struct* cmdVdp1;
 static int* nbCmd;
 
+static int cmdRam_update_start = 0x0;
+static int cmdRam_update_end = 0x80000;
+
 static int* clear;
 
 static int generateComputeBuffer(int w, int h);
 
-static GLuint compute_tex[4] = {0};
+static GLuint compute_tex[2] = {0};
 static GLuint ssbo_cmd_ = 0;
 static GLuint ssbo_vdp1ram_ = 0;
 static GLuint ssbo_nbcmd_ = 0;
-static GLuint ssbo_vdp1access_[2] = {0};
+static GLuint ssbo_vdp1access_ = 0;
 static GLuint prg_vdp1[NB_PRG] = {0};
 
-static u8 vdp1_access[2][512*256*4];
-static u32* vdp1_fb_map[2] = {NULL};
+static u32 write_fb[512*256];
 
 static const GLchar * a_prg_vdp1[NB_PRG][4] = {
   //VDP1_MESH_STANDARD
@@ -107,7 +110,7 @@ int ErrorHandle(const char* name)
     case GL_INVALID_FRAMEBUFFER_OPERATION:  msg = "INVALID_FRAMEBUFFER_OPERATION"; break;
     default:  msg = "Unknown"; break;
     }
-    VDP1CPRINT("GLErrorLayer:ERROR:%04x'%s' %s\n", error_code, msg, name);
+    YuiMsg("GLErrorLayer:ERROR:%04x'%s' %s\n", error_code, msg, name);
     error_code = glGetError();
   } while (error_code != GL_NO_ERROR);
   abort();
@@ -135,7 +138,7 @@ static GLuint createProgram(int count, const GLchar** prg_strs) {
     glGetShaderiv(result, GL_INFO_LOG_LENGTH, &length);
     GLchar *info = malloc(sizeof(GLchar) *length);
     glGetShaderInfoLog(result, length, NULL, info);
-    VDP1CPRINT("[COMPILE] %s\n", info);
+    YuiMsg("[COMPILE] %s\n", info);
     free(info);
     abort();
   }
@@ -149,7 +152,7 @@ static GLuint createProgram(int count, const GLchar** prg_strs) {
     glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
     GLchar *info = malloc(sizeof(GLchar) *length);
     glGetProgramInfoLog(program, length, NULL, info);
-    VDP1CPRINT("[LINK] %s\n", info);
+    YuiMsg("[LINK] %s\n", info);
     free(info);
     abort();
   }
@@ -158,7 +161,7 @@ static GLuint createProgram(int count, const GLchar** prg_strs) {
 
 static int generateComputeBuffer(int w, int h) {
   if (compute_tex[0] != 0) {
-    glDeleteTextures(4,&compute_tex[0]);
+    glDeleteTextures(2,&compute_tex[0]);
   }
 	if (ssbo_vdp1ram_ != 0) {
     glDeleteBuffers(1, &ssbo_vdp1ram_);
@@ -173,7 +176,7 @@ static int generateComputeBuffer(int w, int h) {
   }
   glGenBuffers(1, &ssbo_cmd_);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_cmd_);
-  glBufferData(GL_SHADER_STORAGE_BUFFER, struct_size*2000*NB_COARSE_RAST, NULL, GL_DYNAMIC_DRAW);
+  glBufferData(GL_SHADER_STORAGE_BUFFER, struct_size*QUEUE_SIZE*NB_COARSE_RAST, NULL, GL_DYNAMIC_DRAW);
 
   if (ssbo_nbcmd_ != 0) {
     glDeleteBuffers(1, &ssbo_nbcmd_);
@@ -182,17 +185,15 @@ static int generateComputeBuffer(int w, int h) {
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_nbcmd_);
   glBufferData(GL_SHADER_STORAGE_BUFFER, NB_COARSE_RAST * sizeof(int),NULL,GL_DYNAMIC_DRAW);
 
-	if (ssbo_vdp1access_[0] != 0) {
-    glDeleteBuffers(2, ssbo_vdp1access_);
+	if (ssbo_vdp1access_ != 0) {
+    glDeleteBuffers(1, &ssbo_vdp1access_);
 	}
 
-	glGenBuffers(2, &ssbo_vdp1access_[0]);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1access_[0]);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, 512*256*4, NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1access_[1]);
+	glGenBuffers(1, &ssbo_vdp1access_);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1access_);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, 512*256*4, NULL, GL_DYNAMIC_DRAW);
 
-  glGenTextures(4, &compute_tex[0]);
+  glGenTextures(2, &compute_tex[0]);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, compute_tex[0]);
   glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -208,20 +209,6 @@ static int generateComputeBuffer(int w, int h) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindTexture(GL_TEXTURE_2D, compute_tex[2]);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindTexture(GL_TEXTURE_2D, compute_tex[3]);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	if (clear != NULL) free(clear);
 	clear = (int*)malloc(w*h * sizeof(int));
@@ -230,44 +217,154 @@ static int generateComputeBuffer(int w, int h) {
   return 0;
 }
 
+u8* cmdBuffer;
+
+void vdp1GenerateBuffer(vdp1cmd_struct* cmd) {
+	int endcnt;
+	u32 dot;
+	int pos = (cmd->CMDSRCA * 8) & 0x7FFFF;
+  u8 END = ((cmd->CMDPMOD & 0x80) != 0);
+	u8* buf = &cmdBuffer[0];
+	switch ((cmd->CMDPMOD >> 3) & 0x7) {
+    case 0:
+    case 1:
+			for(int h=0; h < cmd->h; h++) {
+				endcnt = 0;
+				for(int w=0; w < cmd->w/2; w++)
+				{
+					dot = Vdp1RamReadByte(NULL, Vdp1Ram, pos);
+					if (!END && (endcnt >= 2)) {
+          	dot |= 0xF0;
+					}
+					else if (((dot & 0xF0) == 0xF0) && !END) {
+          	endcnt++;
+        	} else {
+						if (((cmd->CMDPMOD >> 3) & 0x7)==1) {
+							//ColorLut
+							u32 addr = ((dot>>4) * 2 + cmd->CMDCOLR * 8);
+							u16 val = Vdp1RamReadWord(NULL, Vdp1Ram, addr);
+							if (cmdRam_update_start > addr) cmdRam_update_start = addr;
+							if (cmdRam_update_end < (addr + 2)) cmdRam_update_end = addr + 2;
+							T1WriteWord(buf, addr, val);
+						}
+					}
+					if (!END && (endcnt >= 2)) {
+          	dot |= 0xF;
+					}
+					else if (((dot & 0xF) == 0xF) && !END) {
+          	endcnt++;
+					} else {
+						if (((cmd->CMDPMOD >> 3) & 0x7)==1) {
+							//ColorLut
+							u32 addr = ((dot&0xF) * 2 + cmd->CMDCOLR * 8);
+							u16 val = Vdp1RamReadWord(NULL, Vdp1Ram, addr);
+							if (cmdRam_update_start > addr) cmdRam_update_start = addr;
+							if (cmdRam_update_end < (addr + 2)) cmdRam_update_end = addr + 2;
+							T1WriteWord(buf, addr, val);
+						}
+        	}
+					if (cmdRam_update_start > pos) cmdRam_update_start = pos;
+					if (cmdRam_update_end < (pos + 1)) cmdRam_update_end = pos + 1;
+					T1WriteByte(buf, pos, dot);
+					pos += 1;
+	    	}
+			}
+	    break;
+	    case 2:
+	    case 3:
+	    case 4:
+				for(int h=0; h < cmd->h; h++) {
+					endcnt = 0;
+					for(int w = 0; w < cmd->w; w++)
+					{
+						dot = Vdp1RamReadByte(NULL, Vdp1Ram, pos);
+						if (!END && (endcnt >= 2)) {
+							dot = 0xFF;
+						}
+						else if ((dot == 0xFF) && !END) {
+							endcnt++;
+						}
+						if (cmdRam_update_start > pos) cmdRam_update_start = pos;
+						if (cmdRam_update_end < (pos + 1)) cmdRam_update_end = pos + 1;
+						T1WriteByte(buf, pos, dot);
+						pos += 1;
+		    	}
+				}
+	    break;
+	    case 5:
+			for(int h=0; h < cmd->h; h++) {
+				endcnt = 0;
+				for(int w = 0; w < cmd->w; w++)
+	    	{
+					u16 dot = Vdp1RamReadWord(NULL, Vdp1Ram, pos);
+					if (!END && (endcnt >= 2)) {
+						dot = 0x7FFF;
+					}
+					else if ((dot == 0x7FFF) && !END) {
+						endcnt++;
+					}
+					if (cmdRam_update_start > pos) cmdRam_update_start = pos;
+					if (cmdRam_update_end < (pos + 2)) cmdRam_update_end = pos + 2;
+					T1WriteWord(buf, pos, dot);
+					pos += 2;
+	    	}
+			}
+	    break;
+	  }
+}
+
 int vdp1_add(vdp1cmd_struct* cmd, int clipcmd) {
 	int minx = 1024;
 	int miny = 1024;
 	int maxx = 0;
 	int maxy = 0;
 
-  int *C = &cmd->CMDXA;
-	for (int i = 0; i<4; i++) C[i*2] = (C[i*2] * _Ygl->vdp1wratio);
-	for (int i = 0; i<4; i++) C[i*2+1] = (C[i*2+1] * _Ygl->vdp1hratio);
 	if (clipcmd == 0) {
-    int border = 1;
+		vdp1GenerateBuffer(cmd);
+    int border = 0;
 		if (cmd->type == NORMAL) border = 0;
 		memcpy(cmd->P,&cmd->CMDXA,8*sizeof(int));
 
-		for (int i = 0; i<8; i++) cmd->P[i] = cmd->P[i] * 2 - border;
+		for (int i = 0; i<8; i++) cmd->P[i] = cmd->P[i] * 2;
 
 		int right = 0;
 		int rightindex = -1;
-		int top = 0;
-		int topindex = -1;
-
 		for (int i = 0; i<4; i++) {
-			if ((cmd->P[i*2]+cmd->P[((i+1)%4)*2]) > right) {
-				right = (cmd->P[i*2]+cmd->P[((i+1)%4)*2]);
+			if (cmd->P[i*2] >= right) {
+				right = cmd->P[i*2];
 				rightindex = i;
 			}
 		}
-		cmd->P[rightindex*2] += 2*border;
-		cmd->P[((rightindex+1)%4)*2] += 2*border;
-
+		right = 0;
+		int rightindexsec = -1;
 		for (int i = 0; i<4; i++) {
-			if ((cmd->P[i*2+1]+cmd->P[((i+1)%4)*2+1]) > top) {
-				top = (cmd->P[i*2+1]+cmd->P[((i+1)%4)*2+1]);
+			if ((cmd->P[i*2] >= right) && (i!=rightindex)) {
+				right = cmd->P[i*2];
+				rightindexsec = i;
+			}
+		}
+		cmd->P[rightindex*2] += 2*border;
+		cmd->P[rightindexsec*2] += 2*border;
+
+		int top = 0;
+		int topindex = -1;
+		for (int i = 0; i<4; i++) {
+			if (cmd->P[i*2+1] >= top) {
+				top = cmd->P[i*2+1];
 				topindex = i;
 			}
 		}
-		cmd->P[topindex*2+1] += 2*border;
-		cmd->P[((topindex+1)%4)*2+1] += 2*border;
+		top = 0;
+		int topindexsec = -1;
+		for (int i = 0; i<4; i++) {
+			if ((cmd->P[i*2+1] >= top) && (i!=topindex)) {
+				top = cmd->P[i*2+1];
+				topindexsec = i;
+			}
+		}
+
+    cmd->P[topindex*2+1] += 2*border;
+		cmd->P[topindexsec*2+1] += 2*border;
 
 	  float Ax = cmd->P[0]/2.0;
 		float Ay = cmd->P[1]/2.0;
@@ -294,30 +391,36 @@ int vdp1_add(vdp1cmd_struct* cmd, int clipcmd) {
 
 	//Add a bounding box
 	  cmd->B[0] = minx*tex_ratiow;
-	  cmd->B[1] = maxx*tex_ratiow;
+	  cmd->B[1] = (maxx+1)*tex_ratiow;
 	  cmd->B[2] = miny*tex_ratioh;
-	  cmd->B[3] = maxy*tex_ratioh;
+	  cmd->B[3] = (maxy+1)*tex_ratioh;
+
 	}
   int intersectX = -1;
   int intersectY = -1;
+	int requireCompute = 0;
   for (int i = 0; i<NB_COARSE_RAST_X; i++) {
     int blkx = i * (tex_width/NB_COARSE_RAST_X);
     for (int j = 0; j<NB_COARSE_RAST_Y; j++) {
       int blky = j*(tex_height/NB_COARSE_RAST_Y);
-      if (!(blkx > maxx
-        || (blkx + (tex_width/NB_COARSE_RAST_X)) < minx
-        || (blky + (tex_height/NB_COARSE_RAST_Y)) < miny
-        || blky > maxy)
+      if (!(blkx > maxx*_Ygl->vdp1wratio
+        || (blkx + (tex_width/NB_COARSE_RAST_X)) < minx*_Ygl->vdp1wratio
+        || (blky + (tex_height/NB_COARSE_RAST_Y)) < miny*_Ygl->vdp1hratio
+        || blky > maxy*_Ygl->vdp1hratio)
 			  || (clipcmd!=0)) {
-					memcpy(&cmdVdp1[(i+j*NB_COARSE_RAST_X)*2000 + nbCmd[i+j*NB_COARSE_RAST_X]], cmd, sizeof(vdp1cmd_struct));
+					memcpy(&cmdVdp1[(i+j*NB_COARSE_RAST_X)*QUEUE_SIZE + nbCmd[i+j*NB_COARSE_RAST_X]], cmd, sizeof(vdp1cmd_struct));
           nbCmd[i+j*NB_COARSE_RAST_X]++;
-					if (nbCmd[i+j*NB_COARSE_RAST_X] == 2000) {
-						YuiMsg("This game is processing a lot of graphic commands on the same frame. It might introduce graphical artifacts\n");
-						vdp1_compute(&Vdp2Lines[0], _Ygl->drawframe);
+					if (nbCmd[i+j*NB_COARSE_RAST_X] == QUEUE_SIZE) {
+						requireCompute = 1;
 					}
       }
     }
   }
+	if (requireCompute != 0){
+		YuiMsg("This game is processing a lot of graphic commands on the same frame. It might introduce graphical artifacts\n");
+		vdp1_compute();
+  }
+  return 0;
 }
 
 void vdp1_clear(int id, float *col) {
@@ -326,46 +429,62 @@ void vdp1_clear(int id, float *col) {
     prg_vdp1[progId] = createProgram(sizeof(a_prg_vdp1[progId]) / sizeof(char*), (const GLchar**)a_prg_vdp1[progId]);
   glUseProgram(prg_vdp1[progId]);
 
-	glBindImageTexture(0, compute_tex[id*2], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-	glBindImageTexture(1, compute_tex[id*2+1], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	glBindImageTexture(0, compute_tex[id], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
 	glUniform4fv(2, 1, col);
 	glDispatchCompute(work_groups_x, work_groups_y, 1); //might be better to launch only the right number of workgroup
 }
 
-static void vdp1_write(int id) {
+void vdp1_write() {
 	int progId = WRITE;
-	if (prg_vdp1[progId] == 0)
+	if (prg_vdp1[progId] == 0) {
     prg_vdp1[progId] = createProgram(sizeof(a_prg_vdp1[progId]) / sizeof(char*), (const GLchar**)a_prg_vdp1[progId]);
+	}
   glUseProgram(prg_vdp1[progId]);
 
-	glBindImageTexture(0, compute_tex[id*2], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vdp1access_[id]);
-	glUniform2f(2, (float)_Ygl->rwidth/(float)(tex_width*tex_ratiow), (float)_Ygl->rheight/(float)(tex_height*tex_ratioh));
+	glBindImageTexture(0, compute_tex[_Ygl->drawframe], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vdp1access_);
+	// glUniform2f(2, 512.0f/(float)(tex_width*tex_ratiow), 256.0f/(float)(tex_height*tex_ratioh));
+	glUniform2f(2, 1.0f, 1.0f);
 
 	glDispatchCompute(work_groups_x, work_groups_y, 1); //might be better to launch only the right number of workgroup
 }
 
-static u32* vdp1_read(int id) {
-	if (vdp1_fb_map[id] != NULL) return vdp1_fb_map[id];
-	else {
-		int progId = READ;
-		if (prg_vdp1[progId] == 0)
-	    prg_vdp1[progId] = createProgram(sizeof(a_prg_vdp1[progId]) / sizeof(char*), (const GLchar**)a_prg_vdp1[progId]);
-	  glUseProgram(prg_vdp1[progId]);
+u32* vdp1_read() {
+	int progId = READ;
+	if (prg_vdp1[progId] == 0)
+    prg_vdp1[progId] = createProgram(sizeof(a_prg_vdp1[progId]) / sizeof(char*), (const GLchar**)a_prg_vdp1[progId]);
+  glUseProgram(prg_vdp1[progId]);
 
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo_vdp1access_[id]);
-	  glBindImageTexture(1, compute_tex[id*2], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
-		glUniform2f(2, (float)(tex_width*tex_ratiow)/(float)_Ygl->rwidth, (float)(tex_height*tex_ratioh)/(float)_Ygl->rheight);
+	glBindImageTexture(0, compute_tex[_Ygl->drawframe], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vdp1access_);
 
-		glDispatchCompute(work_groups_x, work_groups_y, 1); //might be better to launch only the right number of workgroup
+//	glUniform2f(2, (float)(tex_width*tex_ratiow)/512.0f, (float)(tex_height*tex_ratioh)/256.0f);
+  glUniform2f(2, 1.0f, 1.0f);
 
-	  glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
-
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1access_[id]);
-		vdp1_fb_map[id] = (u32 *)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, 512*256*4, GL_MAP_WRITE_BIT | GL_MAP_READ_BIT);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-		return vdp1_fb_map[id];
+	//waitVdp1End
+	{
+	  int end = 0;
+	  if (_Ygl->syncVdp1[_Ygl->drawframe] != 0) {
+	    while (end == 0) {
+	      int ret;
+	      ret = glClientWaitSync(_Ygl->syncVdp1[_Ygl->drawframe], GL_SYNC_FLUSH_COMMANDS_BIT, 20000000);
+	      if ((ret == GL_CONDITION_SATISFIED) || (ret == GL_ALREADY_SIGNALED)) end = 1;
+	    }
+	    glDeleteSync(_Ygl->syncVdp1[_Ygl->drawframe]);
+	    _Ygl->syncVdp1[_Ygl->drawframe] = 0;
+	  }
 	}
+
+	glDispatchCompute(work_groups_x, work_groups_y, 1); //might be better to launch only the right number of workgroup
+
+  glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+
+#ifdef _OGL3_
+	glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0x0, 512*256*4, (void*)(&write_fb[0]));
+#endif
+
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	return &write_fb[0];
 }
 
 
@@ -380,56 +499,48 @@ void vdp1_compute_init(int width, int height, float ratiow, float ratioh)
   if (am != 0) {
     struct_size += 16 - am;
   }
-	memset(vdp1_access[0], 0, 512*256*4);
-  memset(vdp1_access[1], 0, 512*256*4);
-  work_groups_x = (tex_width*tex_ratiow) / local_size_x;
-  work_groups_y = (tex_height*tex_ratioh) / local_size_y;
-  generateComputeBuffer(tex_width*tex_ratiow, tex_height*tex_ratioh);
+  work_groups_x = _Ygl->vdp1width / local_size_x;
+  work_groups_y = _Ygl->vdp1height / local_size_y;
+  generateComputeBuffer(_Ygl->vdp1width, _Ygl->vdp1height);
 	if (nbCmd == NULL)
   	nbCmd = (int*)malloc(NB_COARSE_RAST *sizeof(int));
   if (cmdVdp1 == NULL)
-		cmdVdp1 = (vdp1cmd_struct*)malloc(NB_COARSE_RAST*2000*sizeof(vdp1cmd_struct));
+		cmdVdp1 = (vdp1cmd_struct*)malloc(NB_COARSE_RAST*QUEUE_SIZE*sizeof(vdp1cmd_struct));
   memset(nbCmd, 0, NB_COARSE_RAST*sizeof(int));
-	memset(cmdVdp1, 0, NB_COARSE_RAST*2000*sizeof(vdp1cmd_struct*));
+	memset(cmdVdp1, 0, NB_COARSE_RAST*QUEUE_SIZE*sizeof(vdp1cmd_struct*));
+	cmdBuffer = (u8*)malloc(0x80000);
 	return;
 }
 
-u32* vdp1_get_directFB(Vdp2 *varVdp2Regs, int id) {
-  u32 *ret = vdp1_fb_map[id];
-	if (vdp1_fb_map[id] == NULL) {
-		vdp1_compute(varVdp2Regs, id);
-		ret = vdp1_read(id);
-	}
-	return ret;
-}
-
-void vdp1_set_directFB(int id) {
-	int is_exported = (vdp1_fb_map[id] != NULL);
-	if (is_exported != 0) {
-		vdp1_fb_map[id] = NULL;
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1access_[id]);
-		glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
-		if (_Ygl->vdp1IsNotEmpty[id] == 1) {
-			vdp1_write(id);
-			_Ygl->vdp1IsNotEmpty[id] = 0;
-		}
+void vdp1_set_directFB() {
+	if (_Ygl->vdp1IsNotEmpty == 1) {
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1access_);
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0x0, 512*256*4, (void*)(_Ygl->vdp1fb_buf));
+		vdp1_write();
+		_Ygl->vdp1On[_Ygl->drawframe] = 1;
+		//vdp1_fb_map = NULL;
+		_Ygl->vdp1IsNotEmpty = 0;
 	}
 }
 
 void vdp1_setup(void) {
 	if (ssbo_vdp1ram_ == 0) return;
-	if (vdp1Ram_update_start < vdp1Ram_update_end) {
+	if (cmdRam_update_start < cmdRam_update_end) {
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_vdp1ram_);
-		glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0x0, 0x80000, (void*)(&Vdp1Ram[0]));
-		vdp1Ram_update_start = 0x80000;
-		vdp1Ram_update_end = 0x0;
+		glBufferSubData(GL_SHADER_STORAGE_BUFFER, cmdRam_update_start, (cmdRam_update_end - cmdRam_update_start), (void*)(&cmdBuffer[cmdRam_update_start]));
+		cmdRam_update_start = 0x80000;
+		cmdRam_update_end = 0x0;
 	}
 }
 
-int* vdp1_compute(Vdp2 *varVdp2Regs, int id) {
+int * get_vdp1_tex() {
+	return &compute_tex[_Ygl->readframe];
+}
+
+void vdp1_compute() {
   GLuint error;
 	int progId = getProgramId();
-	int needRender = _Ygl->vdp1IsNotEmpty[id];
+	int needRender = _Ygl->vdp1IsNotEmpty;
 	if (prg_vdp1[progId] == 0)
     prg_vdp1[progId] = createProgram(sizeof(a_prg_vdp1[progId]) / sizeof(char*), (const GLchar**)a_prg_vdp1[progId]);
   glUseProgram(prg_vdp1[progId]);
@@ -439,20 +550,22 @@ int* vdp1_compute(Vdp2 *varVdp2Regs, int id) {
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_cmd_);
   for (int i = 0; i < NB_COARSE_RAST; i++) {
     if (nbCmd[i] != 0) {
-    	glBufferSubData(GL_SHADER_STORAGE_BUFFER, struct_size*i*2000, nbCmd[i]*sizeof(vdp1cmd_struct), (void*)&cmdVdp1[2000*i]);
+			// printf("%d\n", nbCmd[i]);
+    	glBufferSubData(GL_SHADER_STORAGE_BUFFER, struct_size*i*QUEUE_SIZE, nbCmd[i]*sizeof(vdp1cmd_struct), (void*)&cmdVdp1[QUEUE_SIZE*i]);
 			needRender = 1;
 		}
   }
 
-  if (needRender == 0) return &compute_tex[id*2];
+  if (needRender == 0) {
+		return;
+	}
 
-	_Ygl->vdp1On[id] = 1;
+	_Ygl->vdp1On[_Ygl->drawframe] = 1;
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_nbcmd_);
   glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(int)*NB_COARSE_RAST, (void*)nbCmd);
 
-	glBindImageTexture(0, compute_tex[id*2], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-	glBindImageTexture(1, compute_tex[id*2+1], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	glBindImageTexture(0, compute_tex[_Ygl->drawframe], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
 
 #ifdef USE_VDP1_TEX
 	glUniform1i(2, 0);
@@ -486,23 +599,22 @@ int* vdp1_compute(Vdp2 *varVdp2Regs, int id) {
     scale.m[1][3] = 1.0 - scale.m[1][1];
     YglMatrixMultiply(&m, &scale, &mat);
 	}
-	// printf("*********************\n");
-	// printf("%f %f %f\n", m.m[0][0], m.m[0][1], m.m[0][2]);
-  // printf("%f %f %f\n", m.m[1][0], m.m[1][1], m.m[1][2]);
-	// printf("%f %f %f\n", m.m[2][0], m.m[2][1], m.m[2][2]);
-  glUniformMatrix4fv(9, 1, 0, m.m);
+  glUniformMatrix4fv(9, 1, 0, (GLfloat*)m.m);
 
-
-
+	vdp1_set_directFB();
   glDispatchCompute(work_groups_x, work_groups_y, 1); //might be better to launch only the right number of workgroup
+	if (_Ygl->syncVdp1[_Ygl->drawframe] != 0) {
+		glDeleteSync(_Ygl->syncVdp1[_Ygl->drawframe]);
+		_Ygl->syncVdp1[_Ygl->drawframe] = 0;
+	}
+	_Ygl->syncVdp1[_Ygl->drawframe] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
   ErrorHandle("glDispatchCompute");
 
-		vdp1_set_directFB(id);
 	//glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BI
   memset(nbCmd, 0, NB_COARSE_RAST*sizeof(int));
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-  return &compute_tex[id*2];
+  return;
 }

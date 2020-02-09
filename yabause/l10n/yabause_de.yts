@@ -129,6 +129,7 @@ Comment :|Kommentar :
 Common Control Registers|Common Control Registers
 Compatibility List|Kompatibilitätsliste			   
 Compare Type|Vergleiche Typen
+Compute Shader Video Interface|Shader berechnen Video-Schnittstelle
 Couldn't save state file|Statusdatei konnte nicht gespeichert werden
 Couldn't load state file|Statusdatei konnte nicht geladen werden
 CPU Tesselation|CPU Tesselation
@@ -222,6 +223,15 @@ Kronos Qt Gui<br />Based on Kronos %1<br /><a href="http://yabause.org">http://y
 Kronos Save State (*.yss)|Kronos Speicherstände (*.yss)
 Kronos is not initialized, can't manage backup ram.|Kronos ist nicht initialisiert, Backup Ram kann nicht verwaltet werden.						  
 Language :|Sprache :
+Load1|
+Load2|
+Load3|
+Load4|
+Load5|
+Load6|
+Load7|
+Load8|
+Load9|
 L&oad State|L&ade Spielstand
 Left|Links
 Left trigger|Linke Schultertaste
@@ -253,7 +263,7 @@ Mouse Configuration|Mouse Configuration
 Mpeg ROM|Mpeg ROM
 Musashi Interface|Musashi Schnittstelle
 nanovg OSD Interface|nanovg OSD Schnittstelle
-Native (native resolution of Window)|Nativ (native Auflösung von Window)
+Native (current resolution of the window)|Nativ (native Auflösung von Window)
 NBG0|NBG0
 NBG0/RBG1 Info|NBG0/RBG1 Info
 NBG1|NBG1
@@ -268,7 +278,7 @@ Never|Niemals
 No matches found.|Keine Treffer gefunden
 None|Keine
 None|Keine
-Normal format not available, trying alternative|										
+Normal format not available, trying alternative|Normales Format nicht verfügbar, versuche es alternativ										
 North America (NTSC)|Nordamerika (NTSC)
 Number of Threads|
 On fullscreen|Auf Vollbild
@@ -305,6 +315,15 @@ Right Stick Axis Y|Rechte Stielachse Y
 Right Stick Axis Throttle|Steuerknüppel der rechten Achse
 Right trigger|Rechte Schultertaste
 R&un|
+Save1|Speichern1
+Save2|Speichern2
+Save3|Speichern3
+Save4|Speichern4
+Save5|Speichern5
+Save6|Speichern6
+Save7|Speichern7
+Save8|Speichern8
+Save9|Speichern9
 Save As Bitmap|Als Bitmap speichern
 Save As WAV|Als WAV speichern
 Save Bitmap|Als Bitmap speichern
@@ -336,7 +355,7 @@ Search Memory|Speichersuche
 Search Value:|Suchwert:
 Sega Saturn Sound Format files (*.ssf *.minissf)|Sega Saturn Sound Format-Dateien (* .ssf * .minissf)
 Select a file to load your state|Wählen Sie eine Datei zum Laden des Spielstandes aus
-Select your iso/cue/bin file|Wählen Sie Ihre iso/cue/bin Datei
+Select your iso/cue/bin/zip/chd file|Wählen Sie Ihre iso/cue/bin/zip/chd Datei
 Select your ssf file|						
 Set PC to Start Address|PC zur Startadresse setzen
 Settings|Einstellungen

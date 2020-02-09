@@ -1,6 +1,8 @@
 project(kronos)
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.12)
+
+cmake_policy(VERSION 3.12)
 
 #-------------------------------------------------------------------------------
 #add local find scripts to CMAKE path
@@ -9,17 +11,10 @@ LIST(APPEND CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/CMake/Packages
 )
 
-option(YAB_FORCE_GLES20 "force to use OpenGLES 2.0" ON)
-if (YAB_FORCE_GLES20)
-set(GLSystem "OpenGL ES 2.0")
-else(YAB_FORCE_GLES20)
-set(GLSystem "Desktop OpenGL")
-endif(YAB_FORCE_GLES20)
-
 set(YAB_PACKAGE kronos)
-set(YAB_VERSION_MAJOR 1)
-set(YAB_VERSION_MINOR 7)
-set(YAB_VERSION_PATCH 0)
+set(YAB_VERSION_MAJOR 2)
+set(YAB_VERSION_MINOR 0)
+set(YAB_VERSION_PATCH 2)
 set(YAB_VERSION "${YAB_VERSION_MAJOR}.${YAB_VERSION_MINOR}.${YAB_VERSION_PATCH}")
 
 set(CPACK_SOURCE_GENERATOR TGZ)

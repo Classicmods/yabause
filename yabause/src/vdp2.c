@@ -46,9 +46,14 @@ Vdp2 * Vdp2Regs;
 Vdp2Internal_struct Vdp2Internal;
 Vdp2External_struct Vdp2External;
 
+static u8 AC_VRAM[4][8] = {0}; //4 banks, 8 timings
+
+extern void waitVdp2DrawScreensEnd(int sync, int abort);
+
 int isSkipped = 0;
 
-u8 Vdp2ColorRamUpdated = 0;
+u8 Vdp2ColorRamUpdated[512] = {0};
+u8 Vdp2ColorRamToSync[512] = {0};
 u8 A0_Updated = 0;
 u8 A1_Updated = 0;
 u8 B0_Updated = 0;
@@ -430,14 +435,15 @@ void Vdp2Reset(void) {
 //////////////////////////////////////////////////////////////////////////////
 
 static int checkFrameSkip(void) {
+#if 0
   int ret = 0;
- #if 0
   if (isAutoFrameSkip() != 0) return ret;
   unsigned long now = YabauseGetTicks();
   if (nextFrameTime == 0) nextFrameTime = YabauseGetTicks();
   if(nextFrameTime < now) ret = 1;
- #endif
   return ret;
+#endif
+  return !(yabsys.frame_count % (yabsys.skipframe+1) == 0);
 }
 
 void resetFrameSkip(void) {
@@ -469,8 +475,8 @@ void Vdp2VBlankIN(void) {
 
    ScuSendVBlankIN();
 
-   if (yabsys.IsSSH2Running)
-      SH2SendInterrupt(SSH2, 0x43, 0x6);
+   //if (yabsys.IsSSH2Running)
+   //   SH2SendInterrupt(SSH2, 0x43, 0x6);
 
    FrameProfileAdd("VIN end");
 }
@@ -484,8 +490,8 @@ void Vdp2HBlankIN(void) {
   if (yabsys.LineCount < yabsys.VBlankLineCount) {
     Vdp2Regs->TVSTAT |= 0x0004;
     ScuSendHBlankIN();
-    if (yabsys.IsSSH2Running)
-      SH2SendInterrupt(SSH2, 0x41, 0x2);
+    //if (yabsys.IsSSH2Running)
+    //  SH2SendInterrupt(SSH2, 0x41, 0x2);
   } else {
 // Fix : Function doesn't exist without those defines
 #if defined(HAVE_LIBGL) || defined(__ANDROID__) || defined(IOS)
@@ -496,6 +502,7 @@ void Vdp2HBlankIN(void) {
 
 void Vdp2HBlankOUT(void) {
   int i;
+  updateVdp2ColorRam(yabsys.LineCount);
   if (yabsys.LineCount < yabsys.VBlankLineCount)
   {
     Vdp2Regs->TVSTAT &= ~0x0004;
@@ -568,6 +575,7 @@ Vdp2 * Vdp2RestoreRegs(int line, Vdp2* lines) {
 void Vdp2VBlankOUT(void) {
   g_frame_count++;
   FRAMELOG("***** VOUT %d *****", g_frame_count);
+  YglUpdateColorRam();
   if (Vdp2External.perline_alpha == Vdp2External.perline_alpha_a){
     Vdp2External.perline_alpha = Vdp2External.perline_alpha_b;
     Vdp2External.perline_alpha_draw = Vdp2External.perline_alpha_a;
@@ -1129,9 +1137,46 @@ void Vdp2ReadReg(int addr) {
    }
 }
 
+void updateCyclePattern() {
+  AC_VRAM[0][0] = (Vdp2Regs->CYCA0L >> 12) & 0x0F;
+  AC_VRAM[0][1] = (Vdp2Regs->CYCA0L >> 8) & 0x0F;
+  AC_VRAM[0][2] = (Vdp2Regs->CYCA0L >> 4) & 0x0F;
+  AC_VRAM[0][3] = (Vdp2Regs->CYCA0L >> 0) & 0x0F;
+  AC_VRAM[0][4] = (Vdp2Regs->CYCA0U >> 12) & 0x0F;
+  AC_VRAM[0][5] = (Vdp2Regs->CYCA0U >> 8) & 0x0F;
+  AC_VRAM[0][6] = (Vdp2Regs->CYCA0U >> 4) & 0x0F;
+  AC_VRAM[0][7] = (Vdp2Regs->CYCA0U >> 0) & 0x0F;
+
+  AC_VRAM[1][0] = (Vdp2Regs->CYCA1L >> 12) & 0x0F;
+  AC_VRAM[1][1] = (Vdp2Regs->CYCA1L >> 8) & 0x0F;
+  AC_VRAM[1][2] = (Vdp2Regs->CYCA1L >> 4) & 0x0F;
+  AC_VRAM[1][3] = (Vdp2Regs->CYCA1L >> 0) & 0x0F;
+  AC_VRAM[1][4] = (Vdp2Regs->CYCA1U >> 12) & 0x0F;
+  AC_VRAM[1][5] = (Vdp2Regs->CYCA1U >> 8) & 0x0F;
+  AC_VRAM[1][6] = (Vdp2Regs->CYCA1U >> 4) & 0x0F;
+  AC_VRAM[1][7] = (Vdp2Regs->CYCA1U >> 0) & 0x0F;
+
+  AC_VRAM[2][0] = (Vdp2Regs->CYCB0L >> 12) & 0x0F;
+  AC_VRAM[2][1] = (Vdp2Regs->CYCB0L >> 8) & 0x0F;
+  AC_VRAM[2][2] = (Vdp2Regs->CYCB0L >> 4) & 0x0F;
+  AC_VRAM[2][3] = (Vdp2Regs->CYCB0L >> 0) & 0x0F;
+  AC_VRAM[2][4] = (Vdp2Regs->CYCB0U >> 12) & 0x0F;
+  AC_VRAM[2][5] = (Vdp2Regs->CYCB0U >> 8) & 0x0F;
+  AC_VRAM[2][6] = (Vdp2Regs->CYCB0U >> 4) & 0x0F;
+  AC_VRAM[2][7] = (Vdp2Regs->CYCB0U >> 0) & 0x0F;
+
+  AC_VRAM[3][0] = (Vdp2Regs->CYCB1L >> 12) & 0x0F;
+  AC_VRAM[3][1] = (Vdp2Regs->CYCB1L >> 8) & 0x0F;
+  AC_VRAM[3][2] = (Vdp2Regs->CYCB1L >> 4) & 0x0F;
+  AC_VRAM[3][3] = (Vdp2Regs->CYCB1L >> 0) & 0x0F;
+  AC_VRAM[3][4] = (Vdp2Regs->CYCB1U >> 12) & 0x0F;
+  AC_VRAM[3][5] = (Vdp2Regs->CYCB1U >> 8) & 0x0F;
+  AC_VRAM[3][6] = (Vdp2Regs->CYCB1U >> 4) & 0x0F;
+  AC_VRAM[3][7] = (Vdp2Regs->CYCB1U >> 0) & 0x0F;
+}
+
 void FASTCALL Vdp2WriteWord(SH2_struct *context, u8* mem, u32 addr, u16 val) {
    addr &= 0x1FF;
-
    switch (addr)
    {
       case 0x000:
@@ -1170,27 +1215,35 @@ void FASTCALL Vdp2WriteWord(SH2_struct *context, u8* mem, u32 addr, u16 val) {
          return;
       case 0x010:
          Vdp2Regs->CYCA0L = val;
+         updateCyclePattern();
          return;
       case 0x012:
          Vdp2Regs->CYCA0U = val;
+         updateCyclePattern();
          return;
       case 0x014:
          Vdp2Regs->CYCA1L = val;
+         updateCyclePattern();
          return;
       case 0x016:
          Vdp2Regs->CYCA1U = val;
+         updateCyclePattern();
          return;
       case 0x018:
          Vdp2Regs->CYCB0L = val;
+         updateCyclePattern();
          return;
       case 0x01A:
          Vdp2Regs->CYCB0U = val;
+         updateCyclePattern();
          return;
       case 0x01C:
          Vdp2Regs->CYCB1L = val;
+         updateCyclePattern();
          return;
       case 0x01E:
          Vdp2Regs->CYCB1U = val;
+         updateCyclePattern();
          return;
       case 0x020:
          Vdp2Regs->BGON = val;
@@ -1638,9 +1691,7 @@ int Vdp2LoadState(FILE *fp, UNUSED int version, int size)
    if(VIDCore) VIDCore->Resize(0,0,0,0,0);
 
 #if defined(HAVE_LIBGL) || defined(__ANDROID__) || defined(IOS)
-   for (int i = 0; i < 0x1000; i += 2) {
-     YglOnUpdateColorRamWord(i);
-   }
+   YglDirtyColorRamWord();
 #endif
 
    return size;

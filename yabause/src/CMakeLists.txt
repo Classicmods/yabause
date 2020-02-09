@@ -6,14 +6,17 @@ include (CheckCSourceCompiles)
 include(CheckFunctionExists)
 include(CheckIncludeFile)
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.12)
+
+cmake_policy(VERSION 3.12)
+
+option(YAB_FORCE_GLES31 "force to use OpenGLES 3.1" OFF)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/CMakeTests)
 
 set(kronos_HEADERS
 	bios.h
 	cdbase.h cheat.h coffelf.h core.h cs0.h cs1.h cs2.h
-	debug.h
 	error.h
 	gameinfo.h
 	japmodem.h
@@ -37,10 +40,11 @@ else()
 set(YAB_PORTS "qt;linux" CACHE STRING "List of ports to build")
 endif(WIN32)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fomit-frame-pointer")
+
 set(kronos_SOURCES
 	bios.c
 	cdbase.c cheat.c coffelf.c cs0.c cs1.c cs2.c
-	debug.c
 	error.c
 	gameinfo.c
 	japmodem.c
@@ -53,6 +57,7 @@ set(kronos_SOURCES
 	titan/titan.c
 	vdp1.c vdp2.c vdp2debug.c vidshared.c vidsoft.c
 	yabause.c
+	Counter.cpp
         eeprom.c
         decrypt.c
         stv.c
@@ -304,10 +309,46 @@ endif ()
 # OpenGL
 option(YAB_WANT_OPENGL "use OpenGL for video output (most ports require it)" ON)
 if (YAB_WANT_OPENGL AND (YAB_RGB STREQUAL ""))
-	include(FindOpenGL)
+	if (NOT YAB_FORCE_GLES31)
+		include(FindOpenGL)
+	endif (NOT YAB_FORCE_GLES31)
+  include(FindOpenGLES)
+	include(FindEGL)
+
 	if (OPENGL_FOUND)
+	  message(STATUS "OPENGL Core supported")
+		add_definitions(-D_OGL3_)
+		SET( NEED_GLEW "YES")
+		SET( OPENGL_CURRENT_LIBRARIES ${OPENGL_LIBRARIES} )
+		SET( OPENGL_SUPPORTED "YES" )
+	else (OPENGL_FOUND)
+		if (OPENGLES31_FOUND)
+		  if (NOT EGL_FOUND)
+				message(ERROR "No EGL found")
+			endif (NOT EGL_FOUND)
+		  message(STATUS "OPENGL ES 3.1 supported")
+			add_definitions(-D_OGLES31_)
+			SET( OPENGL_CURRENT_LIBRARIES ${OPENGLES_LIBRARIES} ${EGL_LIBRARIES} )
+			SET( OPENGL_SUPPORTED "YES" )
+		else (OPENGLES31_FOUND)
+			if (OPENGLES3_FOUND)
+				if (NOT EGL_FOUND)
+					message(ERROR "No EGL found")
+				endif (NOT EGL_FOUND)
+		  	message(STATUS "OPENGL ES 3.0 supported")
+				SET( NEED_GLEW "YES")
+				SET( OPENGL_CURRENT_LIBRARIES ${OPENGLES_LIBRARIES} ${EGL_LIBRARIES} )
+				SET( OPENGL_SUPPORTED "YES" )
+			else (OPENGLES3_FOUND)
+				SET( OPENGL_SUPPORTED "NO" )
+			endif (OPENGLES3_FOUND)
+		endif (OPENGLES31_FOUND)
+	endif (OPENGL_FOUND)
+
+
+	if (OPENGL_SUPPORTED)
 		add_definitions(-DHAVE_LIBGL=1)
-		set(KRONOS_LIBRARIES ${KRONOS_LIBRARIES} ${OPENGL_LIBRARIES})
+		set(KRONOS_LIBRARIES ${KRONOS_LIBRARIES} ${OPENGL_CURRENT_LIBRARIES})
 
 		include_directories(./ ./nanovg)
 		set(kronos_SOURCES ${kronos_SOURCES}
@@ -326,25 +367,31 @@ if (YAB_WANT_OPENGL AND (YAB_RGB STREQUAL ""))
 		endif()
 
 		# glXGetProcAddress
-		set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} ${OPENGL_LIBRARIES})
+		set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} ${OPENGL_CURRENT_LIBRARIES})
 		check_function_exists(glXGetProcAddress GLXGETPROCADDRESS_OK)
 		if (GLXGETPROCADDRESS_OK)
 			add_definitions(-DHAVE_GLXGETPROCADDRESS=1)
 		endif()
-		add_definitions(-D_OGL3_)
-    include(FindGLEW)
-    add_definitions(-D_USEGLEW_)
-    add_definitions(-DGLEW_STATIC)
-    include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/gllibs/include/ )
+
+		if (NEED_GLEW)
+	    include(FindGLEW)
+	    add_definitions(-D_USEGLEW_)
+	    add_definitions(-DGLEW_STATIC)
+	    include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/gllibs/include/ )
+			set(kronos_SOURCES
+				${kronos_SOURCES}
+				gllibs/glew/glew.c
+			)
+		endif (NEED_GLEW)
 		set(kronos_SOURCES
-			${kronos_SOURCES}
-			gllibs/glew/glew.c
+				${kronos_SOURCES}
 			yglcache.c
 			ygles.c
 			vidogl.c
 			yglshaderes.c
 			rbg_compute.cpp
 			vdp2_compute.cpp
+			common_glshader.c
 			upscale_shader.c
 			yglcs.c
 			vidcs.c
@@ -352,10 +399,11 @@ if (YAB_WANT_OPENGL AND (YAB_RGB STREQUAL ""))
 		)
 		set(kronos_HEADERS
 			${kronos_HEADERS}
+			common_glshader.h
 			vdp1/vdp1_compute.h
 			vdp1/vdp1_prog_compute.h
 		)
-	endif(OPENGL_FOUND)
+	endif(OPENGL_SUPPORTED)
 endif ()
 option(SPRITE_CACHE "Vdp1 sprite cache" ON)
 if (SPRITE_CACHE)
@@ -724,7 +772,7 @@ else ()
 endif ()
 
 if (CMAKE_COMPILER_IS_GNUCC)
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfpmath=sse -m64 -march=native -funroll-loops")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -D_DEFAULT_SOURCE -Wno-format -mfpmath=sse -m64 -march=native -funroll-loops")
         set(CMAKE_CPP_FLAGS "${CMAKE_CPP_FLAGS} -mfpmath=sse -m64 -march=native -funroll-loops")
 endif()
 
@@ -743,9 +791,11 @@ endif ()
 
 if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "i686")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${YAB_OPTIMIZATION} -march=i686 -msse")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 endif("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "i686")
 if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${YAB_OPTIMIZATION}")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 endif("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
 if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "armv5tel")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${YAB_OPTIMIZATION}")
@@ -765,7 +815,7 @@ endif()
 
 # Warnings defined to know when we're breaking compilation with MSVC
 if (CMAKE_COMPILER_IS_GNUCC)
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wdeclaration-after-statement")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 endif ()
 
 if (MSVC)

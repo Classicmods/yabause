@@ -96,6 +96,8 @@
 
 #include <inttypes.h>
 
+#define DECILINE_STEP (20.0)
+
 //#define DEBUG_ACCURACY
 
 #define THREAD_LOG //printf
@@ -380,11 +382,13 @@ int YabauseInit(yabauseinit_struct *init)
    yabsys.NumThreads = init->numthreads;
    yabsys.usecache = init->usecache;
    yabsys.vsyncon = init->vsyncon;
+   yabsys.skipframe = init->skipframe;
    yabsys.isRotated = 0;
    nextFrameTime = 0;
 
   q_scsp_frame_start = YabThreadCreateQueue(1);
   q_scsp_finish = YabThreadCreateQueue(1);
+  setM68kCounter(0);
 
 #ifdef SPRITE_CACHE
    yabsys.useVdp1cache = init->useVdp1cache;
@@ -556,9 +560,12 @@ int YabauseInit(yabauseinit_struct *init)
 		   }
 		   yabsys.emulatebios = 0;
 	   }
-	   else
+	   else {
 		   yabsys.emulatebios = 1;
-   } else yabsys.emulatebios = 0;
+       T2WriteLong(BiosRom, 0x04, 0x06002000); // set base stack pointer
+     }
+   }
+   else yabsys.emulatebios = 0;
 
    yabsys.usequickload = 0;
 
@@ -608,13 +615,14 @@ int YabauseInit(yabauseinit_struct *init)
       }
    }
 
-   if (Cs2GetRegionID() == 0xC) YabauseSetVideoFormat(VIDEOFORMATTYPE_PAL);
+   if (Cs2GetRegionID() >= 0xA) YabauseSetVideoFormat(VIDEOFORMATTYPE_PAL);
    else YabauseSetVideoFormat(VIDEOFORMATTYPE_NTSC);
 
 #ifdef HAVE_GDBSTUB
    GdbStubInit(MSH2, 43434);
 #endif
 
+#ifndef NO_VIDCORE_SOFT
    if (yabsys.UseThreads)
    {
       int num = yabsys.NumThreads < 1 ? 1 : yabsys.NumThreads;
@@ -628,6 +636,7 @@ int YabauseInit(yabauseinit_struct *init)
       VIDSoftSetNumLayerThreads(0);
       VIDSoftSetNumPriorityThreads(0);
    }
+#endif
    return 0;
 }
 
@@ -907,7 +916,7 @@ int YabauseEmulate(void) {
          if (yabsys.LineCount == yabsys.VBlankLineCount)
          {
 #if defined(ASYNC_SCSP)
-            setM68kCounter((u64)(44100 * 256 / ((yabsys.IsPal)?50:60)));
+            setM68kCounter((u64)(44100 * 256 / ((yabsys.IsPal)?50:60))<< SCSP_FRACTIONAL_BITS);
 #endif
             PROFILE_START("vblankin");
             // VBlankIN
@@ -1051,10 +1060,16 @@ void YabauseStartSlave(void) {
       SSH2->regs.PC = SH2MappedMemoryReadLong(SSH2, 0x06000250);
       if (SH2MappedMemoryReadLong(SSH2, 0x060002AC) != 0)
          SSH2->regs.R[15] = SH2MappedMemoryReadLong(SSH2, 0x060002AC);
+
+      SSH2->regs.SR.part.I = 0;
       SH2SetRegisters(SSH2, &SSH2->regs);
    }
    else {
      SH2PowerOn(SSH2);
+     SH2GetRegisters(SSH2, &SSH2->regs);
+     SSH2->regs.PC = 0x20000200;
+     SH2SetRegisters(SSH2, &SSH2->regs);
+
    }
 
    yabsys.IsSSH2Running = 1;
@@ -1120,6 +1135,12 @@ void YabauseSetVideoFormat(int type) {
    Vdp2Regs->TVSTAT = Vdp2Regs->TVSTAT | (type & 0x1);
    ScspChangeVideoFormat(type);
    YabauseChangeTiming(yabsys.CurSH2FreqType);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+void YabauseSetSkipframe(int skipframe) {
+   yabsys.skipframe = skipframe;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1265,6 +1286,7 @@ int YabauseQuickLoadGame(void)
 
    Cs2Area->outconcddev = Cs2Area->filter + 0;
    Cs2Area->outconcddevnum = 0;
+   Cs2Area->cdi->ReadTOC(Cs2Area->TOC);
 
    // read in lba 0/FAD 150
    if ((lgpartition = Cs2ReadUnFilteredSector(150)) == NULL)

@@ -111,11 +111,11 @@ void * YabMemMap(char * filename, u32 size ) {
   int fd;
 
   hFile = CreateFileA(
-    filename, 
-    GENERIC_READ|GENERIC_WRITE, 
-    0, 
-    0, 
-    OPEN_EXISTING, 
+    filename,
+    GENERIC_READ|GENERIC_WRITE,
+    0,
+    0,
+    OPEN_EXISTING,
     FILE_ATTRIBUTE_NORMAL,
     0);
   if (INVALID_HANDLE_VALUE == hFile) {
@@ -465,7 +465,7 @@ static u8 FASTCALL BupRamMemoryReadByte(SH2_struct *context, UNUSED u8* memory, 
   addr = addr & ((backup_file_size<<1) - 1);
   if (addr & 0x1) {
     return T1ReadByte(memory, addr>>1);
-  } else 
+  } else
     return 0xFF;
 }
 
@@ -502,7 +502,7 @@ static void FASTCALL BupRamMemoryWriteByte(SH2_struct *context, UNUSED u8* memor
   }
   else {
     T1WriteByte(BupRam, (addr & 0xFFFF) | 0x1, val);
-    BupRamWritten = 1;  
+    BupRamWritten = 1;
   }
 #endif
   addr = addr & ((backup_file_size<<1) - 1);
@@ -588,7 +588,7 @@ void MappedMemoryInit()
                                 &LowWramMemoryWriteWord,
                                 &LowWramMemoryWriteLong,
                                 &LowWram);
-   FillMemoryArea(0x040, 0x041, &IOPortReadByte, 
+   FillMemoryArea(0x040, 0x041, &IOPortReadByte,
                                 &UnhandledMemoryReadWord,
                                 &UnhandledMemoryReadLong,
                                 &IOPortWriteByte,
@@ -766,7 +766,7 @@ CACHE_LOG("rb %x %x\n", addr, addr >> 29);
          return CacheReadByteList[(addr >> 16) & 0xFFF](context, *(MemoryBuffer[(addr >> 16) & 0xFFF]), addr);
       }
       case 0x2:
-         return UnhandledMemoryReadLong(context, *(MemoryBuffer[(addr >> 16) & 0xFFF]), addr);
+         return 0xFF;
       //case 0x4:
       case 0x6:
          // Data Array
@@ -808,7 +808,9 @@ u16 FASTCALL DMAMappedMemoryReadWord(SH2_struct *context, u32 addr) {
 //////////////////////////////////////////////////////////////////////////////
 u16 FASTCALL MappedMemoryReadWord(SH2_struct *context, u32 addr)
 {
-   switch (addr >> 29)
+   int id = addr >> 29;
+   if (context == NULL) id =1;
+   switch (id)
    {
       case 0x0:
       case 0x1:
@@ -848,7 +850,9 @@ LOG("Hunandled Word R %x\n", addr);
 
 u16 FASTCALL SH2MappedMemoryReadWord(SH2_struct *context, u32 addr)
 {
-   switch (addr >> 29)
+    int id = addr >> 29;
+    if (context == NULL) id =1;
+    switch (id)
    {
       case 0x1:
       {
@@ -857,7 +861,8 @@ u16 FASTCALL SH2MappedMemoryReadWord(SH2_struct *context, u32 addr)
       case 0x0: //0x0 cache
            return CacheReadWordList[(addr >> 16) & 0xFFF](context, *(MemoryBuffer[(addr >> 16) & 0xFFF]), addr);
       case 0x2:
-         return UnhandledMemoryReadLong(context, *(MemoryBuffer[(addr >> 16) & 0xFFF]), addr);
+      case 0x5:
+         return 0xFFFF;
       //case 0x4:
       case 0x6:
          // Data Array
@@ -898,7 +903,9 @@ u32 FASTCALL DMAMappedMemoryReadLong(SH2_struct *context, u32 addr)
 //////////////////////////////////////////////////////////////////////////////
 u32 FASTCALL MappedMemoryReadLong(SH2_struct *context, u32 addr)
 {
-  switch (addr >> 29)
+  int id = addr >> 29;
+  if (context == NULL) id =1;
+  switch (id)
    {
       case 0x0:
       case 0x1: //0x0 no cache
@@ -934,7 +941,9 @@ LOG("Hunandled Long R %x %d 0x%x\n", addr, (addr >> 29), (addr >> 16) & 0xFFF);
 
 u32 FASTCALL SH2MappedMemoryReadLong(SH2_struct *context, u32 addr)
 {
-   switch (addr >> 29)
+  int id = addr >> 29;
+  if (context == NULL) id =1;
+  switch (id)
    {
       case 0x1: //0x0 no cache
       {
@@ -945,8 +954,8 @@ u32 FASTCALL SH2MappedMemoryReadLong(SH2_struct *context, u32 addr)
          return CacheReadLongList[(addr >> 16) & 0xFFF](context, *(MemoryBuffer[(addr >> 16) & 0xFFF]), addr);
       }
       case 0x2:
-LOG("Unhandled SH2 Memory Long %d\n", (addr >> 29));
-         return UnhandledMemoryReadLong(context, *(MemoryBuffer[(addr >> 16) & 0xFFF]), addr);
+      case 0x5:
+         return 0xFFFFFFFF;
       case 0x3:
       {
          // Address Array
@@ -992,8 +1001,10 @@ void FASTCALL DMAMappedMemoryWriteByte(SH2_struct *context, u32 addr, u8 val)
 //////////////////////////////////////////////////////////////////////////////
 void FASTCALL MappedMemoryWriteByte(SH2_struct *context, u32 addr, u8 val)
 {
+   int id = addr >> 29;
+   if (context == NULL) id =1;
    SH2WriteNotify(context, addr, 1);
-   switch (addr >> 29)
+   switch (id)
    {
       case 0x0:
       case 0x1:
@@ -1008,7 +1019,7 @@ void FASTCALL MappedMemoryWriteByte(SH2_struct *context, u32 addr, u8 val)
             // Onchip modules
             addr &= 0x1FF;
             OnchipWriteByte(context, addr, val);
-            return; 
+            return;
          }
          else if (addr >= 0xFFFF8000 && addr < 0xFFFFC000)
          {
@@ -1031,8 +1042,10 @@ LOG("Hunandled Byte W %x\n", addr);
 
 void FASTCALL SH2MappedMemoryWriteByte(SH2_struct *context, u32 addr, u8 val)
 {
+   int id = addr >> 29;
+   if (context == NULL) id =1;
    SH2WriteNotify(context, addr, 1);
-   switch (addr >> 29)
+   switch (id)
    {
       case 0x1:
       {
@@ -1065,7 +1078,7 @@ CACHE_LOG("wb %x %x\n", addr, addr >> 29);
             // Onchip modules
             addr &= 0x1FF;
             OnchipWriteByte(context, addr, val);
-            return; 
+            return;
          }
          else if (addr >= 0xFFFF8000 && addr < 0xFFFFC000)
          {
@@ -1094,8 +1107,10 @@ void FASTCALL DMAMappedMemoryWriteWord(SH2_struct *context, u32 addr, u16 val)
 //////////////////////////////////////////////////////////////////////////////
 void FASTCALL MappedMemoryWriteWord(SH2_struct *context, u32 addr, u16 val)
 {
+   int id = addr >> 29;
+   if (context == NULL) id =1;
    SH2WriteNotify(context, addr, 2);
-   switch (addr >> 29)
+   switch (id)
    {
       case 0x0:
       case 0x1:
@@ -1114,7 +1129,7 @@ void FASTCALL MappedMemoryWriteWord(SH2_struct *context, u32 addr, u16 val)
          }
          else if (addr >= 0xFFFF8000 && addr < 0xFFFFC000)
          {
-            // SDRAM setup 
+            // SDRAM setup
          }
          else
          {
@@ -1133,8 +1148,10 @@ LOG("Hunandled Word W %x\n", addr);
 
 void FASTCALL SH2MappedMemoryWriteWord(SH2_struct *context, u32 addr, u16 val)
 {
+   int id = addr >> 29;
+   if (context == NULL) id =1;
    SH2WriteNotify(context, addr, 2);
-   switch (addr >> 29)
+   switch (id)
    {
       case 0x1:
       {
@@ -1173,7 +1190,7 @@ CACHE_LOG("ww %x %x\n", addr, addr >> 29);
          }
          else if (addr >= 0xFFFF8000 && addr < 0xFFFFC000)
          {
-            // SDRAM setup 
+            // SDRAM setup
          }
          else
          {
@@ -1198,8 +1215,10 @@ void FASTCALL DMAMappedMemoryWriteLong(SH2_struct *context, u32 addr, u32 val)
 //////////////////////////////////////////////////////////////////////////////
 void FASTCALL MappedMemoryWriteLong(SH2_struct *context, u32 addr, u32 val)
 {
+   int id = addr >> 29;
+   if (context == NULL) id =1;
    SH2WriteNotify(context, addr, 4);
-   switch (addr >> 29)
+   switch (id)
    {
       case 0x0:
       case 0x1:
@@ -1237,8 +1256,10 @@ LOG("Hunandled Long W %x\n", addr);
 
 void FASTCALL SH2MappedMemoryWriteLong(SH2_struct *context, u32 addr, u32 val)
 {
+   int id = addr >> 29;
+   if (context == NULL) id =1;
    SH2WriteNotify(context, addr, 4);
-   switch (addr >> 29)
+   switch (id)
    {
       case 0x1:
       {
@@ -1415,7 +1436,7 @@ void MappedMemoryLoadExec(SH2_struct *sh, const char *filename, u32 pc)
 
 int BackupHandled(SH2_struct * sh, u32 addr) {
    if ((addr & 0xFFFFF) == 0x7d600) {
-     if (sh == NULL) return 1; 
+     if (sh == NULL) return 1;
      BiosBUPInit(sh);
      return 1;
    }
@@ -1531,9 +1552,9 @@ int CheckBackupFile(FILE *fp) {
 }
 
 int ExtendBackupFile(FILE *fp, u32 size ) {
-
+  u32 acsize;
   fseek(fp, 0, SEEK_END);
-  u32 acsize = ftell(fp);
+  acsize = ftell(fp);
   if (acsize < size) {
     // Clear the rest
     for ( u32 i = (acsize&0xFFFFFFFE) ; i < size; i++)
@@ -1892,9 +1913,9 @@ int YabLoadStateStream(FILE *fp)
    fseek(fp, headersize, SEEK_SET);
 
    // Verify version here
- 
+
    ScspMuteAudio(SCSP_MUTE_SYSTEM);
-   
+
    if (StateCheckRetrieveHeader(fp, "CART", &version, &chunksize) != 0)
    {
       // Revert back to old state here
@@ -2150,7 +2171,7 @@ static int SearchString(SH2_struct *sh, u32 startaddr, u32 endaddr, int searchty
          // Calculate buffer length and read values into table
          buflen = 0;
          for (text=strtok((char *)searchtext, " ,"); text != NULL; text=strtok(NULL, " ,"))
-         {            
+         {
             buf32[buflen] = strtoul(text, NULL, 0);
             buflen++;
          }
@@ -2158,7 +2179,7 @@ static int SearchString(SH2_struct *sh, u32 startaddr, u32 endaddr, int searchty
 
          break;
       }
-   }    
+   }
 
    addr = startaddr;
    counter = 0;
@@ -2198,7 +2219,7 @@ static int SearchString(SH2_struct *sh, u32 startaddr, u32 endaddr, int searchty
                // figure out the diff
                diff = (int)val2 - (int)val;
 
-               // see if there's a match             
+               // see if there's a match
                if (((int)buf32[j] - (int)buf32[j-1]) != diff)
                   break;
 
@@ -2227,7 +2248,7 @@ static int SearchString(SH2_struct *sh, u32 startaddr, u32 endaddr, int searchty
                // figure out the diff
                diff = (int)val2 - (int)val;
 
-               // see if there's a match             
+               // see if there's a match
                if (((int)buf32[j] - (int)buf32[j-1]) != diff)
                   break;
 
@@ -2240,7 +2261,7 @@ static int SearchString(SH2_struct *sh, u32 startaddr, u32 endaddr, int searchty
             addr+=2;
             break;
          }
-      }    
+      }
 
       if (addr > endaddr || numresults >= maxresults[0])
          break;
@@ -2284,7 +2305,7 @@ result_struct *MappedMemorySearch(SH2_struct *sh, u32 startaddr, u32 endaddr, in
 
          return results;
       }
-      case SEARCHHEX:         
+      case SEARCHHEX:
          sscanf(searchstr, "%08lx", &searchval);
          break;
       case SEARCHUNSIGNED:
@@ -2295,7 +2316,7 @@ result_struct *MappedMemorySearch(SH2_struct *sh, u32 startaddr, u32 endaddr, in
          searchval = (unsigned long)strtol(searchstr, NULL, 10);
          issigned = 1;
          break;
-   }   
+   }
 
    if (prevresults)
    {
@@ -2339,7 +2360,7 @@ result_struct *MappedMemorySearch(SH2_struct *sh, u32 startaddr, u32 endaddr, in
                 return results;
              break;
           default:
-             maxresults[0] = 0; 
+             maxresults[0] = 0;
              if (results)
                 free(results);
              return NULL;
